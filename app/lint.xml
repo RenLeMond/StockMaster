@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- CameraX ImageProxy.image 标记为 ExperimentalGetImage，项目内统一 opt-in -->
+    <issue id="UnsafeOptInUsageError">
+        <option name="opt-in" value="androidx.camera.core.ExperimentalGetImage" />
+    </issue>
+</lint>
