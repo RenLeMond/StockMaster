@@ -1,13 +1,13 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.StockMaster" parent="android:Theme.Material.Light.NoActionBar">
+<?xml version="1.0" encoding="utf-8"?><resources>
+    <style name="Theme.StockMaster" parent="android:Theme.Material.NoActionBar">
         <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowBackground">#F8F9FF</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <!-- 与 Compose 深色玻璃主题 DeepBase(#070C16) 一致，消除冷启动首帧白闪 -->
+        <item name="android:windowBackground">#070C16</item>
         <item name="android:dialogTheme">@style/Theme.StockMaster.Dialog</item>
     </style>
 
-    <style name="Theme.StockMaster.Dialog" parent="android:Theme.Material.Light.Dialog">
+    <style name="Theme.StockMaster.Dialog" parent="android:Theme.Material.Dialog">
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowIsFloating">true</item>
         <item name="android:windowElevation">0dp</item>

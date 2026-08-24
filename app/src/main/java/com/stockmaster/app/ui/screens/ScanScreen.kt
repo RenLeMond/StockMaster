@@ -15,7 +15,6 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
-import androidx.camera.core.TorchState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -81,7 +80,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -89,15 +87,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -115,9 +114,11 @@ import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.SizeBreakdown
 import com.stockmaster.app.data.TxType
 import com.stockmaster.app.ui.MainViewModel
+import com.stockmaster.app.ui.components.GlassDefaults
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.SMNumberField
 import com.stockmaster.app.ui.components.SMTextField
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
@@ -184,6 +185,8 @@ fun ScanScreen(
     // 锁焦动效与出入库完成动效浮层
     var scanLockTrigger by remember { mutableStateOf(false) }
     var successCelebration by remember { mutableStateOf<ScanSuccessCelebrationData?>(null) }
+    // 防止「自动跳转」与「手动点击卡片」双重导航导致栈内出现两层 detail
+    var celebrationConsumed by remember { mutableStateOf(false) }
 
     LaunchedEffect(scanLockTrigger) {
         if (scanLockTrigger) {
@@ -197,6 +200,8 @@ fun ScanScreen(
             delay(1600)
             val targetItemId = successCelebration?.itemId
             successCelebration = null
+            if (celebrationConsumed) return@LaunchedEffect
+            celebrationConsumed = true
             if (!targetItemId.isNullOrBlank() && onScanCompletedWithItem != null) {
                 onScanCompletedWithItem(targetItemId)
             } else {
@@ -243,11 +248,27 @@ fun ScanScreen(
         }
     }
 
-    // 相机闪光灯状态同步（CameraInfo.torchState 为 LiveData）
-    val torchState = cameraInfo?.torchState?.observeAsState()
-    LaunchedEffect(torchState?.value) {
-        torchState?.value?.let { torchOn = it == TorchState.ON }
+    // 从系统设置授权返回后自愈：ON_RESUME 复查权限并复位拒绝状态，无需杀进程重启
+    val lifecycleOwner = ComposeLocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val granted = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.CAMERA
+                ) == PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    hasPermission = true
+                    permissionDenied = false
+                    cameraError = null
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+
+    // 手电筒状态由本页面独占控制，本地维护即可；
+    // 避免对 cameraInfo?.torchState 做条件 observeAsState（违反 Compose 调用稳定性规则）
 
     fun handleBarcodeDetected(scannedText: String) {
         if (scannedText.isBlank() || successCelebration != null) return
@@ -268,7 +289,12 @@ fun ScanScreen(
             unrecognizedBarcode = null
 
             if (matched.hasSizes && matched.sizeVariants.isNotEmpty()) {
-                selectedSize = matched.sizeVariants.first().size
+                // 出库时默认选中首个有库存的尺码（0 库存尺码在出库抽屉中被隐藏）
+                selectedSize = if (mode == TxType.OUT) {
+                    (matched.sizeVariants.firstOrNull { it.stock > 0 } ?: matched.sizeVariants.first()).size
+                } else {
+                    matched.sizeVariants.first().size
+                }
                 scanSizeBreakdown = matched.sizeVariants.associate { it.size to 0 }
                 isBatchSizeScan = false
             }
@@ -315,7 +341,8 @@ fun ScanScreen(
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
-            val bitmap = com.stockmaster.app.util.ImageUtils.decodeSampledFromUri(context, uri)
+            // 按 EXIF 方向纠正后再识别，避免相机直出照片躺倒放置导致识别率下降
+            val bitmap = com.stockmaster.app.util.ImageUtils.decodeSampledFromUriWithExif(context, uri)
             if (bitmap != null) {
                 galleryScanner.process(InputImage.fromBitmap(bitmap, 0))
                     .addOnSuccessListener { results ->
@@ -395,7 +422,7 @@ fun ScanScreen(
         val finalStock = if (mode == TxType.IN) item.stock + finalQty else maxOf(0, item.stock - finalQty)
         val totalAmt = finalQty * finalPrice
 
-        viewModel.recordTransaction(
+        val ok = viewModel.recordTransaction(
             com.stockmaster.app.ui.TxDraft(
                 itemId = item.id,
                 itemName = item.name,
@@ -411,11 +438,17 @@ fun ScanScreen(
                 sizeBreakdown = sizePayloadBreakdown
             )
         )
+        // VM 兜底校验失败时不得播报成功/庆祝，避免「失败却庆祝」
+        if (!ok) {
+            Toast.makeText(context, viewModel.txRejectMessage ?: "操作失败，请重试", Toast.LENGTH_LONG).show()
+            return
+        }
 
         BeepPlayer.play(BeepPlayer.BeepType.SUCCESS)
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         showResultDrawer = false
         activeItem = null
+        celebrationConsumed = false
         successCelebration = ScanSuccessCelebrationData(
             itemId = item.id,
             mode = mode,
@@ -442,7 +475,14 @@ fun ScanScreen(
                     cameraInfo = info
                     hasFlash = info.hasFlashUnit()
                 },
-                onCameraError = { cameraError = it },
+                onCameraError = {
+                    cameraError = it
+                    // 绑定失败后清空旧相机引用，避免手电筒等控制作用于已解绑的死对象
+                    cameraControl = null
+                    cameraInfo = null
+                    hasFlash = false
+                    torchOn = false
+                },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -478,8 +518,8 @@ fun ScanScreen(
         ) {
             Row(
                 modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(50))
-                    .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(50))
+                    .background(Color(0x660B1220), RoundedCornerShape(50))
+                    .glassBorder(50.dp)
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -520,21 +560,32 @@ fun ScanScreen(
                     textAlign = TextAlign.Center
                 )
                 Spacer(Modifier.size(24.dp))
-                Row {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val galShape = RoundedCornerShape(12.dp)
                     Box(
                         modifier = Modifier
-                            .background(Color.White, RoundedCornerShape(12.dp))
+                            .clip(galShape)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFF34D399), Color(0xFF059669))
+                                )
+                            )
+                            .border(1.dp, Color.White.copy(alpha = 0.35f), galShape)
                             .clickable { galleryLauncher.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                            .padding(horizontal = 20.dp, vertical = 11.dp)
+                            .padding(horizontal = 18.dp, vertical = 11.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("上传条码图片", color = GreenPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("上传条码图片", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
-                    Spacer(Modifier.size(12.dp))
+                    val manualShape = RoundedCornerShape(12.dp)
                     Box(
                         modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
+                            .clip(manualShape)
+                            .background(Color.White.copy(alpha = 0.12f))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), manualShape)
                             .clickable { showManualInput = true }
-                            .padding(horizontal = 20.dp, vertical = 11.dp)
+                            .padding(horizontal = 18.dp, vertical = 11.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text("手动输入条码", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
@@ -543,7 +594,8 @@ fun ScanScreen(
                     Spacer(Modifier.size(16.dp))
                     Box(
                         modifier = Modifier
-                            .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
                             .clickable {
                                 context.startActivity(
                                     Intent(
@@ -564,7 +616,7 @@ fun ScanScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.Black.copy(alpha = 0.4f))
+                .background(Brush.verticalGradient(listOf(Color(0x8C0D1626), Color(0x330D1626))))
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -606,6 +658,7 @@ fun ScanScreen(
                         val control = cameraControl
                         if (control != null && hasFlash) {
                             control.enableTorch(!torchOn)
+                            torchOn = !torchOn
                         } else {
                             Toast.makeText(context, "当前摄像头未开放物理闪光灯控制", Toast.LENGTH_SHORT).show()
                         }
@@ -646,7 +699,8 @@ fun ScanScreen(
             Row(
                 modifier = Modifier
                     .padding(horizontal = 16.dp)
-                    .background(Color.White, RoundedCornerShape(16.dp))
+                    .background(Color(0xF0152036), RoundedCornerShape(16.dp))
+                    .glassBorder(16.dp)
                     .padding(8.dp)
             ) {
                 SMTextField(
@@ -680,14 +734,14 @@ fun ScanScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.5f))
+                .background(Brush.verticalGradient(listOf(Color(0x660D1626), Color(0xD90D1626))))
                 .padding(vertical = 16.dp),
             contentAlignment = Alignment.Center
         ) {
             Row(
                 modifier = Modifier
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(50))
-                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(50))
+                    .background(Color(0x8C101B30), RoundedCornerShape(50))
+                    .glassBorder(50.dp)
                     .padding(4.dp)
                     .width(256.dp)
             ) {
@@ -765,6 +819,8 @@ fun ScanScreen(
                     onCardClick = {
                         val targetItemId = data.itemId
                         successCelebration = null
+                        if (celebrationConsumed) return@ScanCelebrationCard
+                        celebrationConsumed = true
                         if (!targetItemId.isBlank() && onScanCompletedWithItem != null) {
                             onScanCompletedWithItem(targetItemId)
                         } else {
@@ -872,7 +928,8 @@ private fun ScanCelebrationCard(
     onCardClick: () -> Unit
 ) {
     val isIncoming = data.mode == TxType.IN
-    val accentColor = if (isIncoming) GreenPrimary else Color(0xFFDC2626)
+    val accentColor = if (isIncoming) Color(0xFF34D399) else Color(0xFFF87171)
+    val accentDark = if (isIncoming) Color(0xFF059669) else Color(0xFFDC2626)
     val accentLight = if (isIncoming) GreenLight else Color(0xFFFF6B6B)
     val titleText = if (isIncoming) "扫码入库成功" else "扫码出库成功"
     val deltaSign = if (isIncoming) "+" else "-"
@@ -893,8 +950,16 @@ private fun ScanCelebrationCard(
         Column(
             modifier = Modifier
                 .padding(horizontal = 28.dp)
+                .shadow(
+                    elevation = 32.dp,
+                    shape = RoundedCornerShape(24.dp),
+                    clip = false,
+                    ambientColor = Color.Transparent,
+                    spotColor = accentColor.copy(alpha = 0.45f)
+                )
                 .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xFF0F172A))
+                .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                .glassBorder(24.dp)
                 .border(1.5.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
                 .padding(horizontal = 24.dp, vertical = 26.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -960,7 +1025,15 @@ private fun ScanCelebrationCard(
 
             Box(
                 modifier = Modifier
-                    .background(accentColor, RoundedCornerShape(50))
+                    .shadow(
+                        elevation = 16.dp,
+                        shape = RoundedCornerShape(50),
+                        clip = false,
+                        ambientColor = Color.Transparent,
+                        spotColor = accentColor.copy(alpha = 0.45f)
+                    )
+                    .background(Brush.verticalGradient(listOf(accentColor, accentDark)), RoundedCornerShape(50))
+                    .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(50))
                     .padding(horizontal = 20.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -978,7 +1051,7 @@ private fun ScanCelebrationCard(
 private fun RoundIconButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     onClick: () -> Unit,
-    bg: Color = Color.White.copy(alpha = 0.15f),
+    bg: Color = Color.White.copy(alpha = 0.14f),
     tint: Color = Color.White
 ) {
     Box(
@@ -986,6 +1059,7 @@ private fun RoundIconButton(
             .size(40.dp)
             .clip(RoundedCornerShape(50))
             .background(bg)
+            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {

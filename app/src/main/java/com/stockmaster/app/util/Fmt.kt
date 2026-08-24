@@ -4,6 +4,7 @@ import java.text.DecimalFormat
 import java.text.NumberFormat
 import java.time.Instant
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -17,9 +18,6 @@ object Fmt {
 
     private val intFormat = NumberFormat.getNumberInstance(Locale.CHINA)
 
-    private val isoFormatter: DateTimeFormatter =
-        DateTimeFormatter.ISO_OFFSET_DATE_TIME
-
     private val timeFormatter: DateTimeFormatter =
         DateTimeFormatter.ofPattern("HH:mm")
 
@@ -32,19 +30,17 @@ object Fmt {
     fun int(v: Long): String = intFormat.format(v)
 
     fun parseIso(iso: String): LocalDateTime? {
-        return try {
-            if (iso.contains("Z") || iso.contains("+")) {
-                LocalDateTime.ofInstant(Instant.parse(iso), ZoneId.systemDefault())
-            } else {
-                LocalDateTime.parse(iso)
-            }
-        } catch (e: Exception) {
-            try {
-                LocalDateTime.parse(iso, isoFormatter)
-            } catch (e2: Exception) {
-                null
-            }
+        val value = iso.trim()
+        // 带时区（Z 或 ±hh:mm）→ 统一换算系统时区，保证同一时刻的两种表示显示一致
+        runCatching {
+            return LocalDateTime.ofInstant(OffsetDateTime.parse(value).toInstant(), ZoneId.systemDefault())
         }
+        // 兜底：纯 UTC Instant 形式
+        runCatching {
+            return LocalDateTime.ofInstant(Instant.parse(value), ZoneId.systemDefault())
+        }
+        // 无时区信息：按本地挂钟时间解析
+        return runCatching { LocalDateTime.parse(value) }.getOrNull()
     }
 
     /** 相对时间展示：今天显示"今天 HH:mm"，历史日期显示"x年x月x日 HH:mm"。 */

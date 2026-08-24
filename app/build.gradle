@@ -8,7 +8,6 @@ plugins {
 android {
     namespace "com.stockmaster.app"
     compileSdk 35
-    buildToolsVersion "36.0.0"
 
     defaultConfig {
         applicationId "com.stockmaster.app"
@@ -18,10 +17,32 @@ android {
         versionName "1.0.0"
     }
 
+    signingConfigs {
+        release {
+            // 凭据经环境变量注入，不落入仓库；未配置时 release 不挂签名，
+            // 产出为 unsigned APK（不可直接安装），仅用于 CI 归档，本地分发请配置环境变量或改用 debug 变体
+            def storeFile = System.getenv("SM_KEYSTORE_FILE")
+            def storePassword = System.getenv("SM_KEYSTORE_PASSWORD")
+            def keyAlias = System.getenv("SM_KEY_ALIAS")
+            def keyPassword = System.getenv("SM_KEY_PASSWORD")
+            if (storeFile != null && storePassword != null && keyAlias != null && keyPassword != null) {
+                storeFile file(storeFile)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
+            // 资源收缩与代码压缩配套开启，移除未引用资源
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (System.getenv("SM_KEYSTORE_FILE") != null) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -37,6 +58,8 @@ android {
 
     buildFeatures {
         compose true
+        // Settings 页读取 BuildConfig.VERSION_NAME 展示版本号
+        buildConfig true
     }
 
     packagingOptions {

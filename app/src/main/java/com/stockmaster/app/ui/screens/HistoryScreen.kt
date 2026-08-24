@@ -40,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -56,6 +57,7 @@ import com.stockmaster.app.ui.components.MoneyDisplay
 import com.stockmaster.app.ui.components.SMDropdownMenu
 import com.stockmaster.app.ui.components.SMDropdownMenuItem
 import com.stockmaster.app.ui.components.SelectChip
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderBlue
@@ -97,8 +99,8 @@ fun HistoryScreen(
         }
     }
 
-    val totalInCount = filtered.filter { it.type == TxType.IN }.sumOf { it.quantity }
-    val totalOutCount = filtered.filter { it.type == TxType.OUT }.sumOf { it.quantity }
+    val totalInCount = filtered.filter { it.type == TxType.IN }.sumOf { it.quantity.toLong() }
+    val totalOutCount = filtered.filter { it.type == TxType.OUT }.sumOf { it.quantity.toLong() }
     val totalInAmount = filtered.filter { it.type == TxType.IN }.sumOf {
         it.totalPrice.let { p -> if (p > 0) p else it.quantity * it.unitPrice }
     }
@@ -146,8 +148,8 @@ fun HistoryScreen(
                             Row(
                                 modifier = Modifier
                                     .clip(monthBtnShape)
-                                    .background(Color.White)
-                                    .border(1.dp, BorderLight, monthBtnShape)
+                                    .background(Color.White.copy(alpha = 0.09f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.16f), monthBtnShape)
                                     .clickable { monthMenuOpen = true }
                                     .padding(horizontal = 11.dp, vertical = 7.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -196,15 +198,23 @@ fun HistoryScreen(
             }
         }
 
-        // ── 统计双卡 ──
+        // ── 统计双卡（发光晶体玻璃） ──
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 // 总入库卡
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .shadow(
+                            elevation = 18.dp,
+                            shape = RoundedCornerShape(18.dp),
+                            clip = false,
+                            ambientColor = Color.Transparent,
+                            spotColor = Color(0xFF34D399).copy(alpha = 0.30f)
+                        )
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Brush.verticalGradient(listOf(Color(0xFF007A50), Color(0xFF005A3A))))
+                        .background(Brush.verticalGradient(listOf(Color(0xFF34D399), Color(0xFF059669))))
+                        .glassBorder(18.dp)
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -235,8 +245,16 @@ fun HistoryScreen(
                 Column(
                     modifier = Modifier
                         .weight(1f)
+                        .shadow(
+                            elevation = 18.dp,
+                            shape = RoundedCornerShape(18.dp),
+                            clip = false,
+                            ambientColor = Color.Transparent,
+                            spotColor = Color(0xFFF87171).copy(alpha = 0.30f)
+                        )
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Brush.verticalGradient(listOf(Color(0xFFDC2626), Color(0xFFB91C1C))))
+                        .background(Brush.verticalGradient(listOf(Color(0xFFEF4444), Color(0xFFB91C1C))))
+                        .glassBorder(18.dp)
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -305,18 +323,18 @@ fun HistoryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(Modifier.weight(1f).height(1.dp).background(BorderLight))
+                        Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.10f)))
                         Spacer(Modifier.width(10.dp))
                         Box(
                             modifier = Modifier
-                                .background(Color(0xFFF1F5F9), RoundedCornerShape(50))
-                                .border(1.dp, BorderLight, RoundedCornerShape(50))
+                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(50))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(50))
                                 .padding(horizontal = 12.dp, vertical = 4.dp)
                         ) {
                             Text(label, color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(Modifier.width(10.dp))
-                        Box(Modifier.weight(1f).height(1.dp).background(BorderLight))
+                        Box(Modifier.weight(1f).height(1.dp).background(Color.White.copy(alpha = 0.10f)))
                     }
                 }
                 // 当天流水卡片列表
@@ -325,8 +343,8 @@ fun HistoryScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
-                            .background(Color.White)
-                            .border(1.dp, BorderLight, RoundedCornerShape(18.dp)),
+                            .background(Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.04f))))
+                            .glassBorder(18.dp),
                         verticalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
                         txList.forEachIndexed { index, tx ->

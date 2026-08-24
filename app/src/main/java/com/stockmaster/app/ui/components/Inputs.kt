@@ -14,6 +14,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
@@ -35,7 +37,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenPrimary
 import com.stockmaster.app.ui.theme.TextMuted
 import com.stockmaster.app.ui.theme.TextPrimary
@@ -65,13 +67,18 @@ fun SMTextField(
     minLines: Int = 1,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    borderColor: Color = BorderLight.copy(alpha = 0.6f)
+    borderColor: Color = GlassHairline,
+    onFocusChanged: ((Boolean) -> Unit)? = null
 ) {
     var focused by remember { mutableStateOf(false) }
+    val focusToken = remember { Any() }
+    DisposableEffect(focusToken) {
+        onDispose { ScannerGun.releaseFocus(focusToken) }
+    }
     val shape = RoundedCornerShape(11.dp)
     val focusModifier = if (focused) {
         Modifier
-            .background(GreenPrimary.copy(alpha = 0.08f), RoundedCornerShape(13.dp))
+            .background(GreenPrimary.copy(alpha = 0.14f), RoundedCornerShape(13.dp))
             .padding(2.dp)
     } else Modifier
 
@@ -80,7 +87,11 @@ fun SMTextField(
             .height(height)
             .then(focusModifier)
             .clip(shape)
-            .background(Color.White)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = 0.11f), Color.White.copy(alpha = 0.05f))
+                )
+            )
             .border(
                 width = if (focused) 1.5.dp else 1.dp,
                 color = if (focused) GreenPrimary else borderColor,
@@ -89,7 +100,9 @@ fun SMTextField(
             .padding(horizontal = 12.dp)
             .onFocusChanged { state ->
                 focused = state.isFocused
-                ScannerGun.textInputFocused = state.isFocused
+                if (state.isFocused) ScannerGun.acquireFocus(focusToken)
+                else ScannerGun.releaseFocus(focusToken)
+                onFocusChanged?.invoke(state.isFocused)
             },
         contentAlignment = Alignment.CenterStart
     ) {
@@ -148,6 +161,10 @@ fun SMTextField(
     }
 }
 
+/**
+ * 数字输入框：编辑期间保留原始草稿文本（可自由删除、清空），
+ * 失焦后回落显示归一化值，修复「输入 0 后无法删除」的交互问题。
+ */
 @Composable
 fun SMNumberField(
     value: String,
@@ -161,11 +178,34 @@ fun SMNumberField(
     textColor: Color = TextPrimary,
     textAlign: TextAlign = TextAlign.Start,
     decimal: Boolean = false,
-    borderColor: Color = BorderLight.copy(alpha = 0.6f)
+    borderColor: Color = GlassHairline
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(value) }
+
     SMTextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = if (editing) draft else value,
+        onValueChange = { input ->
+            val filtered = if (decimal) {
+                // 只保留首个小数点：多个 '.' 会让下游 toDoubleOrNull 静默失败
+                var dotSeen = false
+                input.filter { c ->
+                    when {
+                        c.isDigit() -> true
+                        c == '.' && !dotSeen -> {
+                            dotSeen = true
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            } else {
+                input.filter { it.isDigit() }
+            }
+            draft = filtered
+            editing = true
+            onValueChange(filtered)
+        },
         modifier = modifier,
         placeholder = placeholder,
         height = height,
@@ -176,7 +216,15 @@ fun SMNumberField(
         textAlign = textAlign,
         keyboardType = if (decimal) KeyboardType.Decimal else KeyboardType.Number,
         imeAction = ImeAction.Done,
-        borderColor = borderColor
+        borderColor = borderColor,
+        onFocusChanged = { isFocused ->
+            if (isFocused) {
+                editing = true
+                draft = value
+            } else {
+                editing = false
+            }
+        }
     )
 }
 
@@ -190,10 +238,14 @@ fun SMTextArea(
     fontSize: TextUnit = 12.sp
 ) {
     var focused by remember { mutableStateOf(false) }
+    val areaFocusToken = remember { Any() }
+    DisposableEffect(areaFocusToken) {
+        onDispose { ScannerGun.releaseFocus(areaFocusToken) }
+    }
     val areaShape = RoundedCornerShape(12.dp)
     val areaFocusModifier = if (focused) {
         Modifier
-            .background(GreenPrimary.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+            .background(GreenPrimary.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
             .padding(2.dp)
     } else Modifier
 
@@ -202,16 +254,21 @@ fun SMTextArea(
             .heightIn(min = minHeight)
             .then(areaFocusModifier)
             .clip(areaShape)
-            .background(Color.White)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color.White.copy(alpha = 0.11f), Color.White.copy(alpha = 0.05f))
+                )
+            )
             .border(
                 width = if (focused) 1.5.dp else 1.dp,
-                color = if (focused) GreenPrimary else BorderLight.copy(alpha = 0.6f),
+                color = if (focused) GreenPrimary else GlassHairline,
                 shape = areaShape
             )
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .onFocusChanged { state ->
                 focused = state.isFocused
-                ScannerGun.textInputFocused = state.isFocused
+                if (state.isFocused) ScannerGun.acquireFocus(areaFocusToken)
+                else ScannerGun.releaseFocus(areaFocusToken)
             }
     ) {
         BasicTextField(

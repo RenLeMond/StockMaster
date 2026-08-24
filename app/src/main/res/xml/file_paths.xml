@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- 最小暴露原则：FileProvider 仅用于向相机应用授予拍照临时文件的写访问，
+     不再映射 files/ 与外部存储根目录 -->
 <paths>
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
-    <external-files-path name="external_files" path="." />
+    <cache-path name="photos" path="." />
 </paths>

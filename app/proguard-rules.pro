@@ -19,3 +19,8 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# release 已开启 R8 混淆：保留行号，崩溃堆栈可用
+# build/outputs/mapping/release/mapping.txt 还原混淆名
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile

@@ -66,6 +66,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -90,15 +91,16 @@ import com.stockmaster.app.ui.components.InputDialog
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.MoneyDisplay
 import com.stockmaster.app.ui.components.PhotoViewerDialog
+import com.stockmaster.app.ui.components.QuantityStepperField
 import com.stockmaster.app.ui.components.SMNumberField
 import com.stockmaster.app.ui.components.SMTextArea
 import com.stockmaster.app.ui.components.SMTextField
 import com.stockmaster.app.ui.components.SelectChip
-import com.stockmaster.app.ui.theme.BgMain
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderLight
 import com.stockmaster.app.ui.theme.DividerColor
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenBorder
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
@@ -127,12 +129,13 @@ fun ProductDetailScreen(
     categories: List<String>,
     locations: List<String>,
     history: List<TransactionRecord>,
-    onUpdate: (InventoryItem) -> Unit,
+    onUpdate: (InventoryItem) -> Boolean,
     onDelete: () -> Unit,
     onQuickIn: () -> Unit,
     onQuickOut: () -> Unit,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
     var editMode by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
 
@@ -166,8 +169,11 @@ fun ProductDetailScreen(
             categories = categories,
             locations = locations,
             onSave = { updated ->
-                onUpdate(updated)
-                editMode = false
+                if (onUpdate(updated)) {
+                    editMode = false
+                } else {
+                    Toast.makeText(context, "SKU 或条码已与其他商品冲突，请修改后保存", Toast.LENGTH_LONG).show()
+                }
             },
             onCancel = { editMode = false }
         )
@@ -212,14 +218,14 @@ private fun DetailView(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         // 顶部导航栏
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(Color.White.copy(alpha = 0.07f))
                 .statusBarsPadding()
-                .border(0.5.dp, BorderLight.copy(alpha = 0.5f))
+                .border(0.5.dp, GlassHairline)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -228,7 +234,7 @@ private fun DetailView(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(backShape)
-                    .background(Color(0xFFF1F5F9))
+                    .background(Color.White.copy(alpha = 0.08f))
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center
             ) {
@@ -495,7 +501,7 @@ private fun DetailView(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFFF1F5F9), RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
@@ -601,8 +607,8 @@ private fun DetailView(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(BgMain, RoundedCornerShape(12.dp))
-                                .border(1.dp, BorderLight.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
                                 .padding(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
@@ -628,8 +634,8 @@ private fun DetailView(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(BgMain, RoundedCornerShape(10.dp))
-                                .border(1.dp, BorderLight.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(10.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(10.dp))
                                 .padding(10.dp)
                         ) {
                             Text("规格备注说明:", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
@@ -750,8 +756,8 @@ private fun MetricGridCard(
 ) {
     Column(
         modifier = modifier
-            .background(Color.White, RoundedCornerShape(14.dp))
-            .border(1.dp, BorderLight.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
@@ -822,7 +828,11 @@ private fun EditView(
 
     // 拍照
     val scope = rememberCoroutineScope()
-    val tempPhoto = remember { File(context.cacheDir, "edit_capture_${System.currentTimeMillis()}.jpg").apply { if (!exists()) createNewFile() } }
+    // 惰性创建：不在组合期做磁盘 IO；离开编辑时清理残留临时文件
+    val tempPhoto = remember { File(context.cacheDir, "edit_capture_${System.currentTimeMillis()}.jpg") }
+    androidx.compose.runtime.DisposableEffect(tempPhoto) {
+        onDispose { if (tempPhoto.exists()) tempPhoto.delete() }
+    }
     val takePictureLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { success ->
@@ -849,6 +859,11 @@ private fun EditView(
     fun applySizePreset(preset: List<String>) {
         variants = preset.map { SizeVariant(size = it, stock = 0, minStock = 0) }
     }
+
+    // 记录进入编辑时的库存快照：保存前检测外部并发写入（如扫码出入库），
+    // 避免用户未改库存字段时用陈旧值静默覆盖新数据
+    val enteredStockText = remember(item.id) { item.stock.toString() }
+    val enteredVariants = remember(item.id) { item.sizeVariants }
 
     val costVal = unitCost.toDoubleOrNull() ?: 0.0
     val priceVal = unitPrice.toDoubleOrNull() ?: 0.0
@@ -900,6 +915,24 @@ private fun EditView(
         val finalSku = sku.trim().ifEmpty { item.sku }
         val finalBarcode = barcode.trim().ifEmpty { item.barcode }
         val validVariants = if (hasSizes) variants.filter { it.size.isNotBlank() } else emptyList()
+
+        // 重名尺码会导致下游按尺码折叠/扣减时账实漂移，保存前拦截
+        if (hasSizes && validVariants.isNotEmpty()) {
+            val sizeNames = validVariants.map { it.size.trim() }
+            if (sizeNames.size != sizeNames.distinct().size) {
+                Toast.makeText(context, "存在重复的尺码名称，请合并或修改后再保存", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+
+        // 外部并发写入保护：库存字段未被用户改动、但商品库存已在其他入口更新时拦截
+        val stockUntouched = if (hasSizes) variants == enteredVariants else stock == enteredStockText
+        val externalChanged = if (hasSizes) item.sizeVariants != enteredVariants else item.stock.toString() != enteredStockText
+        if (stockUntouched && externalChanged) {
+            Toast.makeText(context, "商品库存在其他入口被更新过，请退出编辑后重新进入再保存", Toast.LENGTH_LONG).show()
+            return
+        }
+
         val finalStock = if (hasSizes) validVariants.sumOf { it.stock } else (stock.toIntOrNull() ?: item.stock)
 
         onSave(
@@ -935,14 +968,14 @@ private fun EditView(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         // 顶部操作栏
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(Color.White.copy(alpha = 0.07f))
                 .statusBarsPadding()
-                .border(0.5.dp, BorderLight.copy(alpha = 0.5f))
+                .border(0.5.dp, GlassHairline)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -951,7 +984,7 @@ private fun EditView(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(backShape)
-                    .background(Color(0xFFF1F5F9))
+                    .background(Color.White.copy(alpha = 0.08f))
                     .clickable(onClick = onCancel),
                 contentAlignment = Alignment.Center
             ) {
@@ -967,7 +1000,8 @@ private fun EditView(
             Box(
                 modifier = Modifier
                     .clip(saveTopShape)
-                    .background(GreenPrimary)
+                    .background(Brush.verticalGradient(listOf(Color(0xFF34D399), Color(0xFF059669))))
+                    .border(1.dp, Color.White.copy(alpha = 0.35f), saveTopShape)
                     .clickable { save() }
                     .padding(horizontal = 14.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center
@@ -1197,7 +1231,7 @@ private fun EditView(
                         }
                     }
 
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFF0F4F9)))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
 
                     // 库位
                     Column {
@@ -1260,7 +1294,7 @@ private fun EditView(
                         // 单码 / 多尺码切换
                         Row(
                             modifier = Modifier
-                                .background(Color(0xFFF0F4F9), RoundedCornerShape(10.dp))
+                                .background(Color(0x1FFFFFFF), RoundedCornerShape(10.dp))
                                 .padding(2.dp)
                         ) {
                             val singleShape = RoundedCornerShape(8.dp)
@@ -1268,7 +1302,7 @@ private fun EditView(
                                 modifier = Modifier
                                     .clip(singleShape)
                                     .background(
-                                        if (!hasSizes) GreenPrimary else Color.Transparent
+                                        if (!hasSizes) Color(0xFF0B7A55) else Color.Transparent
                                     )
                                     .clickable {
                                         hasSizes = false
@@ -1288,7 +1322,7 @@ private fun EditView(
                                 modifier = Modifier
                                     .clip(multiShape)
                                     .background(
-                                        if (hasSizes) GreenPrimary else Color.Transparent
+                                        if (hasSizes) Color(0xFF0B7A55) else Color.Transparent
                                     )
                                     .clickable {
                                         hasSizes = true
@@ -1330,19 +1364,18 @@ private fun EditView(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Column(modifier = Modifier.weight(1f)) {
                                 FieldLabel("当前在库数量 ($unit)")
-                                SMNumberField(
-                                    value = stock,
-                                    onValueChange = { stock = it },
-                                    placeholder = "0",
-                                    bold = true
+                                QuantityStepperField(
+                                    value = stock.toIntOrNull() ?: 0,
+                                    onValueChange = { stock = it.toString() },
+                                    placeholderText = "0"
                                 )
                             }
                             Column(modifier = Modifier.weight(1f)) {
                                 FieldLabel("缺货预警阈值 ($unit)")
-                                SMNumberField(
-                                    value = minStock,
-                                    onValueChange = { minStock = it },
-                                    placeholder = "0 (0不预警)"
+                                QuantityStepperField(
+                                    value = minStock.toIntOrNull() ?: 0,
+                                    onValueChange = { minStock = it.toString() },
+                                    placeholderText = "0 (0不预警)"
                                 )
                             }
                         }
@@ -1371,8 +1404,8 @@ private fun EditView(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(BgMain, RoundedCornerShape(12.dp))
-                                        .border(1.dp, BorderLight.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                        .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(12.dp))
+                                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                                         .padding(8.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
@@ -1388,16 +1421,15 @@ private fun EditView(
                                         modifier = Modifier.weight(1.2f)
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    SMNumberField(
-                                        value = v.stock.toString(),
-                                        onValueChange = { input ->
+                                    QuantityStepperField(
+                                        value = v.stock,
+                                        onValueChange = { newStock ->
                                             variants = variants.toMutableList().apply {
-                                                this[index] = this[index].copy(stock = input.toIntOrNull() ?: 0)
+                                                this[index] = this[index].copy(stock = newStock)
                                             }
                                         },
-                                        placeholder = "库存",
                                         height = 36.dp,
-                                        modifier = Modifier.weight(1f)
+                                        modifier = Modifier.weight(1.4f)
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     val delVarShape = RoundedCornerShape(8.dp)
@@ -1422,8 +1454,8 @@ private fun EditView(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(addRowShape)
-                                    .background(Color.White)
-                                    .border(1.dp, BorderLight.copy(alpha = 0.6f), addRowShape)
+                                    .background(Color.White.copy(alpha = 0.07f))
+                                    .border(1.dp, GreenPrimary.copy(alpha = 0.40f), addRowShape)
                                     .clickable { variants = variants + SizeVariant("新尺码", 0) }
                                     .padding(vertical = 10.dp),
                                 contentAlignment = Alignment.Center
@@ -1528,19 +1560,19 @@ private fun EditView(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Column(modifier = Modifier.weight(1f)) {
                             FieldLabel("存放容量上限（可选）")
-                            SMNumberField(
-                                value = maxCapacity,
-                                onValueChange = { maxCapacity = it },
-                                placeholder = "不限制"
+                            QuantityStepperField(
+                                value = maxCapacity.toIntOrNull() ?: 0,
+                                onValueChange = { maxCapacity = if (it <= 0) "" else it.toString() },
+                                placeholderText = "不限制"
                             )
                         }
                         if (hasSizes) {
                             Column(modifier = Modifier.weight(1f)) {
                                 FieldLabel("默认预警阈值 ($unit)")
-                                SMNumberField(
-                                    value = minStock,
-                                    onValueChange = { minStock = it },
-                                    placeholder = "0 (0不预警)"
+                                QuantityStepperField(
+                                    value = minStock.toIntOrNull() ?: 0,
+                                    onValueChange = { minStock = it.toString() },
+                                    placeholderText = "0 (0不预警)"
                                 )
                             }
                         }

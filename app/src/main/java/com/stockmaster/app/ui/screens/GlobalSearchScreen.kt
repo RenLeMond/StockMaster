@@ -43,6 +43,7 @@ import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.SMTextField
 import com.stockmaster.app.ui.theme.BgMain
 import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenPrimary
 import com.stockmaster.app.ui.theme.RedPrimary
 import com.stockmaster.app.ui.theme.TextMuted
@@ -66,20 +67,20 @@ fun GlobalSearchScreen(
             items.filter {
                 it.name.lowercase().contains(q) ||
                     it.sku.lowercase().contains(q) ||
-                    it.barcode.contains(q) ||
+                    it.barcode.lowercase().contains(q) ||
                     it.category.lowercase().contains(q) ||
                     it.location.lowercase().contains(q)
             }
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(Color.White.copy(alpha = 0.07f))
                 .statusBarsPadding()
-                .border(0.5.dp, BorderLight.copy(alpha = 0.5f))
+                .border(0.5.dp, GlassHairline)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -88,7 +89,7 @@ fun GlobalSearchScreen(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(backShape)
-                    .background(Color(0xFFF1F5F9))
+                    .background(Color.White.copy(alpha = 0.08f))
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center
             ) {
@@ -142,8 +143,8 @@ fun GlobalSearchScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(rowShape)
-                            .background(Color.White)
-                            .border(1.dp, BorderLight.copy(alpha = 0.4f), rowShape)
+                            .background(Color.White.copy(alpha = 0.07f))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), rowShape)
                             .clickable { onSelectItem(item.id) }
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically

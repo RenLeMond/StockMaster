@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -35,16 +36,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.TxType
 import com.stockmaster.app.ui.components.FieldLabel
+import com.stockmaster.app.ui.components.GlassDialogPanel
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.QuantityStepper
 import com.stockmaster.app.ui.components.QuickStepRow
@@ -52,8 +54,8 @@ import com.stockmaster.app.ui.components.SMDropdownMenu
 import com.stockmaster.app.ui.components.SMDropdownMenuItem
 import com.stockmaster.app.ui.components.SMNumberField
 import com.stockmaster.app.ui.components.SMTextField
-import com.stockmaster.app.ui.theme.BgMain
-import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.components.glassBorder
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenBorder
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
@@ -87,28 +89,24 @@ fun QuickTransactionDialog(
     val tintBg = if (mode == TxType.IN) GreenTint else RedTint
     val tintBorder = if (mode == TxType.IN) GreenBorder else RedBorder
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
+    // 出库时仅可选有库存的尺码；入库保留全部，以便对已卖空的尺码补货
+    val visibleVariants = if (mode == TxType.OUT) {
+        item.sizeVariants.filter { it.stock > 0 }
+    } else {
+        item.sizeVariants
+    }
+    androidx.compose.runtime.LaunchedEffect(visibleVariants) {
+        if (visibleVariants.isNotEmpty() && visibleVariants.none { it.size == selectedSize }) {
+            selectedSize = visibleVariants.first().size
+        }
+    }
+
+    GlassDialogPanel(onDismissRequest = onDismiss) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            contentAlignment = Alignment.Center
+                .verticalScroll(rememberScrollState())
         ) {
-            androidx.compose.material3.Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                color = BgMain,
-                shadowElevation = 10.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(20.dp)
-                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -144,7 +142,8 @@ fun QuickTransactionDialog(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(closeBtnShape)
-                                .background(Color(0xFFF1F5F9))
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), closeBtnShape)
                                 .clickable(onClick = onDismiss),
                             contentAlignment = Alignment.Center
                         ) {
@@ -158,8 +157,8 @@ fun QuickTransactionDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(14.dp))
-                            .border(1.dp, BorderLight.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                             .padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -189,25 +188,39 @@ fun QuickTransactionDialog(
                         }
                     }
 
-                    // 尺码选择
+                    // 尺码选择（横向滑动，规格多时不挤压；出库时隐藏 0 库存尺码）
                     if (item.hasSizes && item.sizeVariants.isNotEmpty()) {
                         Spacer(Modifier.height(12.dp))
                         FieldLabel("操作尺码")
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            item.sizeVariants.forEach { v ->
+                        if (visibleVariants.isEmpty()) {
+                            Text(
+                                "所有尺码均无库存，请先入库补货",
+                                color = TextMuted,
+                                fontSize = 11.sp
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                visibleVariants.forEach { v ->
                                 val isSelected = selectedSize == v.size
                                 val sizeChipShape = RoundedCornerShape(10.dp)
                                 Row(
                                     modifier = Modifier
                                         .clip(sizeChipShape)
                                         .background(
-                                            if (isSelected) accent else Color.White
+                                            if (isSelected) {
+                                                Brush.verticalGradient(listOf(accent.copy(alpha = 0.95f), accent.copy(alpha = 0.70f)))
+                                            } else {
+                                                Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.09f), Color.White.copy(alpha = 0.04f)))
+                                            }
                                         )
                                         .border(
                                             1.dp,
-                                            if (isSelected) accent else BorderLight.copy(alpha = 0.5f),
+                                            if (isSelected) accent else Color.White.copy(alpha = 0.16f),
                                             sizeChipShape
                                         )
                                         .clickable { selectedSize = v.size }
@@ -227,6 +240,7 @@ fun QuickTransactionDialog(
                                         fontSize = 10.sp
                                     )
                                 }
+                                }
                             }
                         }
                     }
@@ -237,8 +251,8 @@ fun QuickTransactionDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(14.dp))
-                            .border(1.dp, BorderLight.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
                             .padding(14.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -285,8 +299,8 @@ fun QuickTransactionDialog(
                                         .fillMaxWidth()
                                         .height(40.dp)
                                         .clip(locShape)
-                                        .background(Color.White)
-                                        .border(1.dp, BorderLight.copy(alpha = 0.6f), locShape)
+                                        .background(Color.White.copy(alpha = 0.07f))
+                                        .border(1.dp, GlassHairline, locShape)
                                         .clickable { locationMenuOpen = true }
                                         .padding(horizontal = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -360,8 +374,18 @@ fun QuickTransactionDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .shadow(
+                                elevation = 14.dp,
+                                shape = confirmBtnShape,
+                                clip = false,
+                                ambientColor = Color.Transparent,
+                                spotColor = accent.copy(alpha = 0.40f)
+                            )
                             .clip(confirmBtnShape)
-                            .background(accent)
+                            .background(
+                                Brush.verticalGradient(listOf(accent.copy(alpha = 0.95f), accent.copy(alpha = 0.70f)))
+                            )
+                            .glassBorder(14.dp)
                             .clickable {
                                 // 出库库存校验：不足时提示，不做静默截断
                                 if (mode == TxType.OUT) {
@@ -411,7 +435,5 @@ fun QuickTransactionDialog(
                         }
                     }
                 }
-            }
-        }
     }
 }

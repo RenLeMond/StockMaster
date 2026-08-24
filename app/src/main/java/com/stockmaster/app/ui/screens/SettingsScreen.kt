@@ -1,5 +1,8 @@
 package com.stockmaster.app.ui.screens
 
+import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,6 +42,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,6 +53,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.stockmaster.app.BuildConfig
 import com.stockmaster.app.data.CsvManager
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.TransactionRecord
@@ -56,6 +61,7 @@ import com.stockmaster.app.ui.components.ConfirmDialog
 import com.stockmaster.app.ui.theme.BgMain
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenPrimary
 import com.stockmaster.app.ui.theme.RedLight
 import com.stockmaster.app.ui.theme.RedPrimary
@@ -69,7 +75,23 @@ import androidx.compose.material.icons.filled.SettingsBackupRestore
 import com.stockmaster.app.data.BackupManager
 import com.stockmaster.app.data.BackupBundle
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
 /** 设置页（对应 Web SettingsDrawer）。 */
+
+/** 恢复备份的文件大小上限（50MB），防止误选超大文件一次性读入内存导致 OOM。 */
+private const val MAX_BACKUP_BYTES: Long = 50L * 1024 * 1024
+
+private fun backupFileSize(context: Context, uri: Uri): Long? = try {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else null
+    }
+} catch (_: Exception) {
+    null
+}
+
 @Composable
 fun SettingsScreen(
     items: List<InventoryItem>,
@@ -84,6 +106,7 @@ fun SettingsScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     var showClearConfirm by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
@@ -92,20 +115,27 @@ fun SettingsScreen(
         ActivityResultContracts.CreateDocument("application/json")
     ) { uri ->
         uri?.let {
-            try {
-                val bundle = BackupManager.createBackupBundle(
-                    items = items,
-                    transactions = transactions,
-                    categories = categories,
-                    locations = locations
-                )
-                val jsonText = BackupManager.encodeBackupBundle(bundle)
-                context.contentResolver.openOutputStream(it)?.use { stream ->
-                    stream.write(jsonText.toByteArray(Charsets.UTF_8))
+            // NonCancellable：SAF 写盘不随页面退出取消，避免导出文件被截断成损坏文件
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    val bundle = BackupManager.createBackupBundle(
+                        items = items,
+                        transactions = transactions,
+                        categories = categories,
+                        locations = locations
+                    )
+                    val jsonText = BackupManager.encodeBackupBundle(bundle)
+                    context.contentResolver.openOutputStream(it)?.use { stream ->
+                        stream.write(jsonText.toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "全量数据备份已成功导出！", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "导出备份失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
                 }
-                Toast.makeText(context, "全量数据备份已成功导出！", Toast.LENGTH_SHORT).show()
-            } catch (e: Exception) {
-                Toast.makeText(context, "导出备份失败: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -114,23 +144,45 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            try {
-                val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader -> reader.readText() }
-                if (!content.isNullOrBlank()) {
-                    onRestoreBackup(content) { result ->
-                        if (result.isSuccess) {
-                            Toast.makeText(context, "全量数据备份已成功还原！", Toast.LENGTH_SHORT).show()
-                        } else {
+            // NonCancellable：读取过程不随页面退出取消
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    val size = backupFileSize(context, it)
+                    if (size != null && size > MAX_BACKUP_BYTES) {
+                        withContext(Dispatchers.Main) {
                             Toast.makeText(
                                 context,
-                                "备份文件解析失败，请确认选择的是正确的 JSON 备份文件",
+                                String.format(
+                                    java.util.Locale.US,
+                                    "备份文件过大（%.1f MB），超过 %d MB 上限，已取消还原",
+                                    size / 1048576.0, MAX_BACKUP_BYTES / 1048576
+                                ),
                                 Toast.LENGTH_LONG
                             ).show()
                         }
+                        return@launch
+                    }
+                    val content = context.contentResolver.openInputStream(it)?.bufferedReader()?.use { reader -> reader.readText() }
+                    if (!content.isNullOrBlank()) {
+                        // VM 内部已在 IO 解析并把回调切回主线程
+                        onRestoreBackup(content) { result ->
+                            if (result.isSuccess) {
+                                Toast.makeText(context, "全量数据备份已成功还原！", Toast.LENGTH_SHORT).show()
+                            } else {
+                                val reason = result.exceptionOrNull()?.message ?: "备份文件解析失败，请确认选择的是正确的 JSON 备份文件"
+                                Toast.makeText(context, reason, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "备份文件内容为空或读取失败", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "还原出错: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (e: Exception) {
-                Toast.makeText(context, "还原出错: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -139,10 +191,20 @@ fun SettingsScreen(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
         uri?.let {
-            context.contentResolver.openOutputStream(it)?.use { stream ->
-                stream.write(CsvManager.exportItemsCsv(items).toByteArray(Charsets.UTF_8))
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    context.contentResolver.openOutputStream(it)?.use { stream ->
+                        stream.write(CsvManager.exportItemsCsv(items).toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "商品档案表格已导出", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-            Toast.makeText(context, "商品档案表格已导出", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -150,10 +212,20 @@ fun SettingsScreen(
         ActivityResultContracts.CreateDocument("text/csv")
     ) { uri ->
         uri?.let {
-            context.contentResolver.openOutputStream(it)?.use { stream ->
-                stream.write(CsvManager.exportTransactionsCsv(transactions).toByteArray(Charsets.UTF_8))
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    context.contentResolver.openOutputStream(it)?.use { stream ->
+                        stream.write(CsvManager.exportTransactionsCsv(transactions).toByteArray(Charsets.UTF_8))
+                    }
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "出入库流水表格已导出", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
-            Toast.makeText(context, "出入库流水表格已导出", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -161,14 +233,27 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            val imported = context.contentResolver.openInputStream(it)?.let { stream ->
-                CsvManager.parseItemsCsv(stream)
-            } ?: emptyList()
-            if (imported.isNotEmpty()) {
-                onImportItems(imported)
-                Toast.makeText(context, "成功从表格导入/合并 ${imported.size} 条商品数据！", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "表格格式解析失败或内容为空，请检查文件格式。", Toast.LENGTH_SHORT).show()
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    val imported = context.contentResolver.openInputStream(it)?.let { stream ->
+                        CsvManager.parseItemsCsv(stream)
+                    } ?: emptyList()
+                    if (imported.isNotEmpty()) {
+                        // VM 契约：状态写入收敛主线程，导入的读-改-写不能与主线程并发
+                        withContext(Dispatchers.Main.immediate) {
+                            onImportItems(imported)
+                            Toast.makeText(context, "成功从表格导入/合并 ${imported.size} 条商品数据！", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "表格格式解析失败或内容为空，请检查文件格式。", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "导入出错: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
@@ -177,14 +262,26 @@ fun SettingsScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         uri?.let {
-            val imported = context.contentResolver.openInputStream(it)?.let { stream ->
-                CsvManager.parseTransactionsCsv(stream)
-            } ?: emptyList()
-            if (imported.isNotEmpty()) {
-                onImportTransactions?.invoke(imported)
-                Toast.makeText(context, "成功从表格导入 ${imported.size} 条出入库流水！", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(context, "流水表格格式解析失败或内容为空。", Toast.LENGTH_SHORT).show()
+            scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                try {
+                    val imported = context.contentResolver.openInputStream(it)?.let { stream ->
+                        CsvManager.parseTransactionsCsv(stream)
+                    } ?: emptyList()
+                    if (imported.isNotEmpty()) {
+                        withContext(Dispatchers.Main.immediate) {
+                            onImportTransactions?.invoke(imported)
+                            Toast.makeText(context, "成功从表格导入 ${imported.size} 条出入库流水！", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, "流水表格格式解析失败或内容为空。", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(context, "导入出错: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                }
             }
         }
     }
@@ -204,68 +301,82 @@ fun SettingsScreen(
     }
 
     if (showExportDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("选择导出内容", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ExportImportOption(title = "全量数据备份", desc = "备份所有档案、流水与分类库位", icon = Icons.Filled.Save, color = Color(0xFF059669)) {
-                        showExportDialog = false
-                        exportJsonBackupLauncher.launch("StockMaster_全量备份_${CsvManager.today()}.json")
-                    }
-                    ExportImportOption(title = "商品档案表格", desc = "导出商品资料与在库数量表", icon = Icons.Filled.Download, color = BlueAccent) {
-                        showExportDialog = false
-                        exportItemsLauncher.launch("商品档案_${CsvManager.today()}.csv")
-                    }
-                    ExportImportOption(title = "出入库流水表格", desc = "导出所有历史出入库单据明细", icon = Icons.AutoMirrored.Filled.ReceiptLong, color = Color(0xFF0EA5E9)) {
-                        showExportDialog = false
-                        exportTxLauncher.launch("出入库流水_${CsvManager.today()}.csv")
-                    }
+        com.stockmaster.app.ui.components.GlassDialogPanel(
+            onDismissRequest = { showExportDialog = false }
+        ) {
+            Text("选择导出内容", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextPrimary)
+            Spacer(Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExportImportOption(title = "全量数据备份", desc = "备份所有档案、流水与分类库位", icon = Icons.Filled.Save, color = Color(0xFF059669)) {
+                    showExportDialog = false
+                    exportJsonBackupLauncher.launch("StockMaster_全量备份_${CsvManager.today()}.json")
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { showExportDialog = false }) {
-                    Text("取消", color = TextSecondary)
+                ExportImportOption(title = "商品档案表格", desc = "导出商品资料与在库数量表", icon = Icons.Filled.Download, color = BlueAccent) {
+                    showExportDialog = false
+                    exportItemsLauncher.launch("商品档案_${CsvManager.today()}.csv")
+                }
+                ExportImportOption(title = "出入库流水表格", desc = "导出所有历史出入库单据明细", icon = Icons.AutoMirrored.Filled.ReceiptLong, color = Color(0xFF0EA5E9)) {
+                    showExportDialog = false
+                    exportTxLauncher.launch("出入库流水_${CsvManager.today()}.csv")
                 }
             }
-        )
+            Spacer(Modifier.height(14.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { showExportDialog = false }
+                    .padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("取消", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 
     if (showImportDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showImportDialog = false },
-            title = { Text("选择导入内容", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    ExportImportOption(title = "全量数据恢复", desc = "一键恢复所有档案与历史流水", icon = Icons.Filled.SettingsBackupRestore, color = Color(0xFF4F46E5)) {
-                        showImportDialog = false
-                        restoreJsonLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
-                    }
-                    ExportImportOption(title = "商品档案表格", desc = "批量导入或更新商品档案", icon = Icons.Filled.Upload, color = Color(0xFF7C3AED)) {
-                        showImportDialog = false
-                        importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "*/*"))
-                    }
-                    ExportImportOption(title = "出入库流水表格", desc = "导入历史出入库流水记录", icon = Icons.Filled.Upload, color = Color(0xFF0284C7)) {
-                        showImportDialog = false
-                        importTxLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "*/*"))
-                    }
+        com.stockmaster.app.ui.components.GlassDialogPanel(
+            onDismissRequest = { showImportDialog = false }
+        ) {
+            Text("选择导入内容", fontWeight = FontWeight.Bold, fontSize = 17.sp, color = TextPrimary)
+            Spacer(Modifier.height(14.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ExportImportOption(title = "全量数据恢复", desc = "一键恢复所有档案与历史流水", icon = Icons.Filled.SettingsBackupRestore, color = Color(0xFF4F46E5)) {
+                    showImportDialog = false
+                    restoreJsonLauncher.launch(arrayOf("application/json", "text/json", "*/*"))
                 }
-            },
-            confirmButton = {
-                androidx.compose.material3.TextButton(onClick = { showImportDialog = false }) {
-                    Text("取消", color = TextSecondary)
+                ExportImportOption(title = "商品档案表格", desc = "批量导入或更新商品档案", icon = Icons.Filled.Upload, color = Color(0xFF7C3AED)) {
+                    showImportDialog = false
+                    importLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "*/*"))
+                }
+                ExportImportOption(title = "出入库流水表格", desc = "导入历史出入库流水记录", icon = Icons.Filled.Upload, color = Color(0xFF0284C7)) {
+                    showImportDialog = false
+                    importTxLauncher.launch(arrayOf("text/csv", "text/comma-separated-values", "*/*"))
                 }
             }
-        )
+            Spacer(Modifier.height(14.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .clickable { showImportDialog = false }
+                    .padding(vertical = 11.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("取消", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(Color.White.copy(alpha = 0.07f))
                 .statusBarsPadding()
-                .border(0.5.dp, BorderLight.copy(alpha = 0.5f))
+                .border(0.5.dp, GlassHairline)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -274,7 +385,7 @@ fun SettingsScreen(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(backShape)
-                    .background(Color(0xFFF1F5F9))
+                    .background(Color.White.copy(alpha = 0.08f))
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center
             ) {
@@ -345,7 +456,7 @@ fun SettingsScreen(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "货本 StockMaster v1.0.0 · 原生 Android 版",
+                    "货本 StockMaster v${BuildConfig.VERSION_NAME} · 原生 Android 版",
                     color = TextMuted,
                     fontSize = 11.sp
                 )
@@ -369,8 +480,8 @@ private fun SettingRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(rowShape)
-            .background(Color.White)
-            .border(1.dp, if (danger) RedPrimary.copy(alpha = 0.25f) else BorderLight.copy(alpha = 0.4f), rowShape)
+            .background(Color.White.copy(alpha = 0.07f))
+            .border(1.dp, if (danger) RedPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.12f), rowShape)
             .clickable(onClick = onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -409,8 +520,8 @@ private fun ExportImportOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color(0xFFF8FAFC))
-            .border(0.5.dp, BorderLight.copy(alpha = 0.5f), shape)
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically

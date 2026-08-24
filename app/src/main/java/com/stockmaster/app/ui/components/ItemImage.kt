@@ -48,7 +48,8 @@ fun ItemImage(
 ) {
     val dataBitmap by produceState<Bitmap?>(initialValue = null, imageUrl) {
         value = if (!imageUrl.isNullOrEmpty() && imageUrl.startsWith("data:")) {
-            withContext(Dispatchers.Default) { ImageUtils.decodeDataUrl(imageUrl) }
+            // 缩略图场景下采样解码，避免 legacy base64 大图全尺寸解入内存
+            withContext(Dispatchers.Default) { ImageUtils.decodeDataUrl(imageUrl, maxDim = 800) }
         } else null
     }
 
@@ -56,9 +57,9 @@ fun ItemImage(
 
     Box(
         modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
             .background(BlueLightBg)
             .border(0.5.dp, BorderLight.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-            .clip(RoundedCornerShape(12.dp))
             .then(
                 if (onTap != null && hasImage) Modifier.clickable(onClick = onTap) else Modifier
             ),

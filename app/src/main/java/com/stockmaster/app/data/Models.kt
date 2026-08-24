@@ -1,9 +1,11 @@
 package com.stockmaster.app.data
 
+import androidx.compose.runtime.Immutable
 import kotlinx.serialization.Serializable
 
 enum class TxType { IN, OUT }
 
+@Immutable
 @Serializable
 data class SizeVariant(
     val size: String,
@@ -11,12 +13,15 @@ data class SizeVariant(
     val minStock: Int = 0
 )
 
+@Immutable
 @Serializable
 data class SizeBreakdown(
     val size: String,
     val quantity: Int
 )
 
+// 纯值语义的不可变模型，标注 @Immutable 让 Compose 跳过优化生效
+@Immutable
 @Serializable
 data class InventoryItem(
     val id: String,
@@ -40,13 +45,15 @@ data class InventoryItem(
     val isLowStock: Boolean
         get() = minStock > 0 && stock <= minStock
 
+    // 未设置容量上限时不随 stock 水涨船高（否则 stock>=50 时进度条恒钉 50%，失去预警意义）
     val effectiveMaxCapacity: Int
-        get() = maxCapacity ?: maxOf(stock * 2, minStock * 4, 100)
+        get() = maxCapacity ?: maxOf(minStock * 4, 100)
 
     fun stockPercent(): Int =
         (stock.toDouble() / effectiveMaxCapacity * 100).toInt().coerceIn(0, 100)
 }
 
+@Immutable
 @Serializable
 data class TransactionRecord(
     val id: String,

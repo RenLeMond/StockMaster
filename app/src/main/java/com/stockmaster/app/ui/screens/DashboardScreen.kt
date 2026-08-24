@@ -28,9 +28,12 @@ import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -43,25 +46,38 @@ import com.stockmaster.app.data.TransactionRecord
 import com.stockmaster.app.data.TxType
 import com.stockmaster.app.ui.components.AppCard
 import com.stockmaster.app.ui.components.DoubleBezelCard
+import com.stockmaster.app.ui.components.GlassDefaults
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.MoneyDisplay
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderBlue
-import com.stockmaster.app.ui.theme.BorderLight
 import com.stockmaster.app.ui.theme.DividerColor
+import com.stockmaster.app.ui.theme.GlowEmerald
 import com.stockmaster.app.ui.theme.GreenBorder
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
 import com.stockmaster.app.ui.theme.GreenTint
 import com.stockmaster.app.ui.theme.RedBorder
-import com.stockmaster.app.ui.theme.RedLight
+import com.stockmaster.app.ui.theme.RedDark
 import com.stockmaster.app.ui.theme.RedPrimary
 import com.stockmaster.app.ui.theme.RedTint
 import com.stockmaster.app.ui.theme.TextMuted
 import com.stockmaster.app.ui.theme.TextPrimary
 import com.stockmaster.app.ui.theme.TextSecondary
 import com.stockmaster.app.util.Fmt
+
+/** 成本缺失时月毛利估算的回退成本率（假设 30% 毛利率，UI 需注明为估算值）。 */
+private const val COST_FALLBACK_RATIO = 0.7
+
+private data class DashboardStats(
+    val totalValue: Double,
+    val totalUnits: Long,
+    val avgValue: Double,
+    val monthlyProfit: Double,
+    val lowStockItems: List<InventoryItem>
+)
 
 @Composable
 fun DashboardScreen(
@@ -71,21 +87,31 @@ fun DashboardScreen(
     onStartScan: (TxType) -> Unit,
     onSelectItem: (String) -> Unit
 ) {
-    val totalValue = items.sumOf { it.stock * it.unitCost }
-    val totalUnits = items.sumOf { it.stock.toLong() }
-    val avgValue = if (items.isEmpty()) 0.0 else totalValue / items.size
+    // 统计缓存：仅在商品/流水变化时重算，避免每次重组执行 O(交易数×商品数) 扫描
+    val stats = remember(items, transactions) {
+        val totalValue = items.sumOf { it.stock * it.unitCost }
+        val totalUnits = items.sumOf { it.stock.toLong() }
+        val avgValue = if (items.isEmpty()) 0.0 else totalValue / items.size
 
-    val currentMonthPrefix = java.time.LocalDate.now().toString().take(7) // yyyy-MM
-    val monthlyProfit = transactions
-        .filter { it.type == TxType.OUT && it.timestamp.startsWith(currentMonthPrefix) }
-        .sumOf { tx ->
-            val item = items.firstOrNull { it.id == tx.itemId || it.sku == tx.sku }
-            val cost = item?.unitCost ?: (tx.unitPrice * 0.7)
-            val profitPerUnit = maxOf(0.0, tx.unitPrice - cost)
-            profitPerUnit * tx.quantity
-        }
+        // 月毛利估算：成本缺失（商品已删/未填）时按售价×0.7 回退；
+        // 亏损单据如实计入负值，不把亏损钳制为 0 而虚增毛利
+        val currentMonthPrefix = java.time.LocalDate.now().toString().take(7) // yyyy-MM
+        val monthlyProfit = transactions
+            .filter { it.type == TxType.OUT && it.timestamp.startsWith(currentMonthPrefix) }
+            .sumOf { tx ->
+                val item = items.firstOrNull { it.id == tx.itemId || it.sku == tx.sku }
+                val cost = item?.unitCost?.takeIf { c -> c > 0 } ?: (tx.unitPrice * COST_FALLBACK_RATIO)
+                (tx.unitPrice - cost) * tx.quantity
+            }
 
-    val lowStockItems = items.filter { it.minStock > 0 && it.stock <= it.minStock }
+        val lowStockItems = items.filter { it.minStock > 0 && it.stock <= it.minStock }
+        DashboardStats(totalValue, totalUnits, avgValue, monthlyProfit, lowStockItems)
+    }
+    val totalValue = stats.totalValue
+    val totalUnits = stats.totalUnits
+    val avgValue = stats.avgValue
+    val monthlyProfit = stats.monthlyProfit
+    val lowStockItems = stats.lowStockItems
     val recent = transactions.take(5)
 
     LazyColumn(
@@ -94,30 +120,37 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
 
-        // ── 核心资产总览卡 (Executive Asset Card - High-End Mesh) ──
+        // ── 核心资产总览卡 (Executive Emerald Crystal - Glass) ──
         item {
             val outerShape = RoundedCornerShape(24.dp)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(
+                        elevation = 24.dp,
+                        shape = outerShape,
+                        clip = false,
+                        ambientColor = Color.Transparent,
+                        spotColor = GreenPrimary.copy(alpha = 0.28f)
+                    )
                     .clip(outerShape)
-                    .background(Color(0xFF003824).copy(alpha = 0.15f))
-                    .border(0.5.dp, GreenPrimary.copy(alpha = 0.3f), outerShape)
-                    .padding(3.dp)
+                    .background(Brush.verticalGradient(GlassDefaults.crystalEmerald))
+                    .glassBorder(24.dp)
+                    .padding(20.dp)
             ) {
-                val innerShape = RoundedCornerShape(21.dp)
+                // 顶部翡翠环境光晕
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(innerShape)
+                    Modifier
+                        .matchParentSize()
                         .background(
-                            Brush.verticalGradient(
-                                listOf(Color(0xFF006C47), Color(0xFF00452C))
+                            Brush.radialGradient(
+                                colors = listOf(GlowEmerald.copy(alpha = 0.22f), Color.Transparent),
+                                center = Offset(0f, 0f),
+                                radius = 640f
                             )
                         )
-                        .padding(20.dp)
-                ) {
-                    Column {
+                )
+                Column {
                         // 顶部 Eyebrow Tag 行
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -223,19 +256,20 @@ fun DashboardScreen(
                         }
                     }
                 }
-            }
         }
 
         // ── 双核心指标卡：本月利润 + 低库存预警 ──
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                // 本月毛利卡
+                // 本月毛利 · 蔚蓝玻璃晶体卡（实心底垫层，避免环境光晕透出导致卡面发脏）
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(18.dp))
-                        .background(BlueLightBg)
-                        .border(1.dp, BorderBlue, RoundedCornerShape(18.dp))
+                        .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                        .background(Brush.verticalGradient(listOf(BlueAccent.copy(alpha = 0.20f), BlueAccent.copy(alpha = 0.07f))))
+                        .glassBorder(18.dp)
+                        .border(1.dp, BlueAccent.copy(alpha = 0.30f), RoundedCornerShape(18.dp))
                         .padding(16.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -263,18 +297,26 @@ fun DashboardScreen(
                         color = BlueAccent
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text("出库销售毛利核算", color = BlueAccent.copy(alpha = 0.6f), fontSize = 10.sp)
+                    Text("出库销售毛利核算", color = BlueAccent.copy(alpha = 0.78f), fontSize = 10.sp)
                 }
 
-                // 低库存预警卡
+                // 低库存预警 · 玻璃晶体卡（实心底垫层，避免环境光晕透出导致卡面发脏）
                 Column(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(18.dp))
-                        .background(if (lowStockItems.isEmpty()) GreenTint else RedTint)
+                        .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                        .background(
+                            if (lowStockItems.isEmpty()) {
+                                Brush.verticalGradient(listOf(GreenPrimary.copy(alpha = 0.20f), GreenPrimary.copy(alpha = 0.07f)))
+                            } else {
+                                Brush.verticalGradient(listOf(RedPrimary.copy(alpha = 0.22f), RedPrimary.copy(alpha = 0.08f)))
+                            }
+                        )
+                        .glassBorder(18.dp)
                         .border(
                             1.dp,
-                            if (lowStockItems.isEmpty()) GreenBorder else RedBorder,
+                            if (lowStockItems.isEmpty()) GreenPrimary.copy(alpha = 0.35f) else RedPrimary.copy(alpha = 0.40f),
                             RoundedCornerShape(18.dp)
                         )
                         .clickable { onNavigateTab(1) }
@@ -323,7 +365,7 @@ fun DashboardScreen(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         if (lowStockItems.isNotEmpty()) "请及时安排采购补货" else "当前各品类库存正常",
-                        color = if (lowStockItems.isEmpty()) GreenPrimary.copy(alpha = 0.6f) else RedPrimary.copy(alpha = 0.6f),
+                        color = if (lowStockItems.isEmpty()) GreenPrimary.copy(alpha = 0.78f) else RedPrimary.copy(alpha = 0.78f),
                         fontSize = 10.sp
                     )
                 }
@@ -335,7 +377,7 @@ fun DashboardScreen(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ScanActionButton(
                     modifier = Modifier.weight(1f),
-                    gradientColors = listOf(Color(0xFF007A50), Color(0xFF00A369)),
+                    gradientColors = listOf(GreenLight, GreenPrimary),
                     iconTint = Color.White,
                     textColor = Color.White,
                     title = "扫码入库",
@@ -344,7 +386,7 @@ fun DashboardScreen(
                 )
                 ScanActionButton(
                     modifier = Modifier.weight(1f),
-                    gradientColors = listOf(Color(0xFFDC2626), Color(0xFFEF4444)),
+                    gradientColors = listOf(RedPrimary, RedDark),
                     iconTint = Color.White,
                     textColor = Color.White,
                     title = "扫码出库",
@@ -392,8 +434,8 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White)
-                        .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                        .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                        .glassBorder(18.dp)
                         .padding(vertical = 36.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -415,8 +457,8 @@ fun DashboardScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
-                        .background(Color.White)
-                        .border(1.dp, BorderLight, RoundedCornerShape(18.dp))
+                        .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                        .glassBorder(18.dp)
                 ) {
                     recent.forEachIndexed { index, tx ->
                         RecentTxRow(
@@ -455,29 +497,31 @@ private fun ScanActionButton(
     onClick: () -> Unit
 ) {
     val outerShape = RoundedCornerShape(20.dp)
-    val innerShape = RoundedCornerShape(17.dp)
+    val accent = gradientColors.first()
     Box(
         modifier = modifier
+            .shadow(
+                elevation = 16.dp,
+                shape = outerShape,
+                clip = false,
+                ambientColor = Color.Transparent,
+                spotColor = accent.copy(alpha = 0.35f)
+            )
             .clip(outerShape)
-            .background(gradientColors.first().copy(alpha = 0.12f))
-            .border(0.5.dp, gradientColors.first().copy(alpha = 0.25f), outerShape)
+            .background(Brush.verticalGradient(GlassDefaults.hudFill))
+            .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.30f), accent.copy(alpha = 0.12f))))
+            .glassBorder(20.dp)
+            .border(1.dp, accent.copy(alpha = 0.45f), outerShape)
             .clickable(onClick = onClick)
-            .padding(2.5.dp)
+            .padding(horizontal = 14.dp, vertical = 18.dp)
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(innerShape)
-                .background(Brush.verticalGradient(gradientColors))
-                .padding(horizontal = 14.dp, vertical = 18.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(13.dp))
-                    .background(Color.White.copy(alpha = 0.2f))
-                    .border(0.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(13.dp)),
+                    .background(Brush.verticalGradient(listOf(accent.copy(alpha = 0.55f), accent.copy(alpha = 0.30f))))
+                    .border(1.dp, Color.White.copy(alpha = 0.30f), RoundedCornerShape(13.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
@@ -490,7 +534,7 @@ private fun ScanActionButton(
             Spacer(Modifier.height(10.dp))
             Text(title, color = textColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(2.dp))
-            Text(subtitle, color = textColor.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = textColor.copy(alpha = 0.78f), fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

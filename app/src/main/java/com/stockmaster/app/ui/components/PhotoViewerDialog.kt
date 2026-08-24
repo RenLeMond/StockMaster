@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -82,6 +83,18 @@ fun PhotoViewerDialog(
     ) {
         var scale by remember { mutableFloatStateOf(1f) }
         var offset by remember { mutableStateOf(Offset.Zero) }
+        // 容器尺寸：用于按实际内容大小计算平移边界，替代拍脑袋的魔法常数
+        var containerSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+
+        fun clampOffset(o: Offset, s: Float): Offset {
+            val cw = containerSize.width.toFloat()
+            val ch = containerSize.height.toFloat()
+            if (cw <= 0f || ch <= 0f || s <= 1f) return Offset.Zero
+            // graphicsLayer 围绕中心缩放，溢出边距 = (内容宽 × 缩放 − 容器宽) / 2
+            val maxX = ((cw * s - cw) / 2f).coerceAtLeast(0f)
+            val maxY = ((ch * s - ch) / 2f).coerceAtLeast(0f)
+            return Offset(o.x.coerceIn(-maxX, maxX), o.y.coerceIn(-maxY, maxY))
+        }
 
         val dataBitmap by produceState<Bitmap?>(initialValue = null, imageUrl) {
             value = if (imageUrl.startsWith("data:")) {
@@ -111,18 +124,25 @@ fun PhotoViewerDialog(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .onGloballyPositioned { containerSize = it.size }
                     .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoom, _ ->
-                            scale = (scale * zoom).coerceIn(1f, 4.5f)
-                            if (scale > 1f) {
-                                val maxOffset = (scale - 1f) * 1000f
-                                offset = Offset(
-                                    x = (offset.x + pan.x * scale).coerceIn(-maxOffset, maxOffset),
-                                    y = (offset.y + pan.y * scale).coerceIn(-maxOffset, maxOffset)
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            val newScale = (scale * zoom).coerceIn(1f, 4.5f)
+                            // 1) 平移
+                            var newOffset = offset + pan
+                            // 2) 围绕双指质心缩放（graphicsLayer 以视图中心为轴）：
+                            //    保持质心下的内容点不动：off' = d − (d − off)·ratio，d = 质心 − 中心
+                            if (newScale > 1f && scale > 0f) {
+                                val center = Offset(
+                                    containerSize.width / 2f,
+                                    containerSize.height / 2f
                                 )
-                            } else {
-                                offset = Offset.Zero
+                                val d = centroid - center
+                                val ratio = newScale / scale
+                                newOffset = d - (d - newOffset) * ratio
                             }
+                            scale = newScale
+                            offset = clampOffset(newOffset, newScale)
                         }
                     }
                     .pointerInput(Unit) {
@@ -133,6 +153,7 @@ fun PhotoViewerDialog(
                                     offset = Offset.Zero
                                 } else {
                                     scale = 2.4f
+                                    offset = Offset.Zero // 放大时回到中心，避免视觉跳变
                                 }
                             }
                         )

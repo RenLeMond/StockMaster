@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -42,8 +44,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +61,7 @@ import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.SMDropdownMenu
 import com.stockmaster.app.ui.components.SMDropdownMenuItem
 import com.stockmaster.app.ui.components.SelectChip
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderLight
@@ -105,7 +110,7 @@ fun InventoryScreen(
             val matchSearch = q.isEmpty() ||
                 item.name.lowercase().contains(q) ||
                 item.sku.lowercase().contains(q) ||
-                item.barcode.contains(q) ||
+                item.barcode.lowercase().contains(q) ||
                 item.location.lowercase().contains(q)
             val matchCat = selectedCategory == "全部" || item.category == selectedCategory
             val matchLoc = selectedLocation == "全部" || item.location == selectedLocation
@@ -129,11 +134,19 @@ fun InventoryScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 左侧标题组：weight(1f) 占据剩余空间，保证右侧动作按钮不被压缩
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("库存清单", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            "库存清单",
+                            color = TextPrimary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
                         Box(
                             modifier = Modifier
                                 .background(BlueLightBg, RoundedCornerShape(50))
@@ -143,7 +156,8 @@ fun InventoryScreen(
                                 "${items.size} 种品类",
                                 color = BlueAccent,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                         if (filtered.size != items.size) {
@@ -156,7 +170,8 @@ fun InventoryScreen(
                                     "匹配 ${filtered.size} 件",
                                     color = GreenPrimary,
                                     fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -171,8 +186,8 @@ fun InventoryScreen(
                         Box(
                             modifier = Modifier
                                 .clip(manageShape)
-                                .background(Color(0xFFF1F5F9))
-                                .border(0.5.dp, BorderLight, manageShape)
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), manageShape)
                                 .clickable(onClick = onManageCategoriesLocations)
                                 .padding(horizontal = 9.dp, vertical = 7.dp)
                         ) {
@@ -193,10 +208,11 @@ fun InventoryScreen(
                             modifier = Modifier
                                 .clip(addBtnShape)
                                 .background(
-                                    androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                        listOf(GreenPrimary, Color(0xFF00A369))
+                                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                                        listOf(Color(0xFF34D399), Color(0xFF059669))
                                     )
                                 )
+                                .border(1.dp, Color.White.copy(alpha = 0.35f), addBtnShape)
                                 .clickable(onClick = onOpenAdd)
                                 .padding(horizontal = 11.dp, vertical = 7.dp)
                         ) {
@@ -246,10 +262,13 @@ fun InventoryScreen(
                             modifier = Modifier
                                 .height(38.dp)
                                 .clip(locPillShape)
-                                .background(if (isLocFiltered) GreenLight.copy(alpha = 0.2f) else Color.White)
+                                .background(
+                                    if (isLocFiltered) GreenPrimary.copy(alpha = 0.18f)
+                                    else Color.White.copy(alpha = 0.08f)
+                                )
                                 .border(
                                     1.dp,
-                                    if (isLocFiltered) GreenPrimary else BorderLight.copy(alpha = 0.6f),
+                                    if (isLocFiltered) GreenPrimary else Color.White.copy(alpha = 0.16f),
                                     locPillShape
                                 )
                                 .clickable { locationMenuOpen = true }
@@ -384,11 +403,21 @@ fun ProductCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 14.dp,
+                shape = cardShape,
+                clip = false,
+                ambientColor = Color.Transparent,
+                spotColor = if (isLow) RedPrimary.copy(alpha = 0.18f) else Color.Black.copy(alpha = 0.30f)
+            )
             .clip(cardShape)
-            .background(Color.White)
+            .background(
+                Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.13f), Color.White.copy(alpha = 0.05f)))
+            )
+            .glassBorder(18.dp)
             .border(
                 1.dp,
-                if (isLow) RedBorder else BorderLight,
+                if (isLow) RedPrimary.copy(alpha = 0.35f) else Color.Transparent,
                 cardShape
             )
             .clickable(onClick = onClick)
@@ -523,40 +552,50 @@ fun ProductCard(
             }
         }
 
-        // ── 多尺码分布胶囊预览 ──
+        // ── 多尺码分布胶囊预览（仅展示在库规格，可左右滑动；全部为 0 时给出提示） ──
         if (item.hasSizes && item.sizeVariants.isNotEmpty()) {
             Spacer(Modifier.height(9.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                item.sizeVariants.take(6).forEach { v ->
-                    val vLow = v.minStock > 0 && v.stock <= v.minStock
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (vLow) RedTint else Color(0xFFF1F5F9),
-                                RoundedCornerShape(6.dp)
+            val inStockVariants = item.sizeVariants.filter { it.stock > 0 }
+            if (inStockVariants.isEmpty()) {
+                Text(
+                    "各尺码均无在库库存",
+                    color = RedPrimary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    inStockVariants.forEach { v ->
+                        val vLow = v.minStock > 0 && v.stock <= v.minStock
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (vLow) RedTint else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .border(
+                                    0.5.dp,
+                                    if (vLow) RedBorder else Color.White.copy(alpha = 0.14f),
+                                    RoundedCornerShape(6.dp)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                        ) {
+                            Text(
+                                "${v.size}: ${v.stock}",
+                                color = if (vLow) RedPrimary else TextSecondary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
                             )
-                            .border(
-                                0.5.dp,
-                                if (vLow) RedBorder else BorderLight,
-                                RoundedCornerShape(6.dp)
-                            )
-                            .padding(horizontal = 6.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            "${v.size}: ${v.stock}",
-                            color = if (vLow) RedPrimary else TextSecondary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFamily = FontFamily.Monospace
-                        )
+                        }
                     }
-                }
-                if (item.sizeVariants.size > 6) {
-                    Text("+${item.sizeVariants.size - 6}", color = TextMuted, fontSize = 10.sp)
                 }
             }
         }
@@ -572,7 +611,7 @@ fun ProductCard(
                 modifier = Modifier
                     .weight(1f)
                     .height(5.dp)
-                    .background(Color(0xFFEFF2F8), RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(50))
             ) {
                 Box(
                     modifier = Modifier
@@ -581,7 +620,10 @@ fun ProductCard(
                         )
                         .height(5.dp)
                         .background(
-                            if (isLow) RedPrimary else GreenPrimary,
+                            Brush.horizontalGradient(
+                                if (isLow) listOf(Color(0xFFF87171), Color(0xFFDC2626))
+                                else listOf(Color(0xFF34D399), Color(0xFF059669))
+                            ),
                             RoundedCornerShape(50)
                         )
                 )

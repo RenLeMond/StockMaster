@@ -39,6 +39,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -111,7 +114,7 @@ fun AppRoot(viewModel: MainViewModel) {
         return false
     }
 
-    BackHandler(enabled = navStack.size > 1 || quickTxItem != null) {
+    BackHandler(enabled = navStack.size > 1) {
         popBack()
     }
 
@@ -125,23 +128,35 @@ fun AppRoot(viewModel: MainViewModel) {
         }
     }
 
-    // 收到扫码请求时进入 / 复用扫码工作台（不重复压栈）
+    // 收到扫码请求时进入 / 复用扫码工作台（不重复压栈）；
+    // 快捷出入库对话框打开时屏蔽穿透导航，避免对话框悬浮在扫码页之上、
+    // 且确认时基于过期快照执行
     androidx.compose.runtime.LaunchedEffect(scanRequest) {
-        if (scanRequest != null && currentNav.screen != "scan") {
+        if (scanRequest != null && quickTxItem == null && currentNav.screen != "scan") {
             navigateTo(Nav("scan", TxType.IN.name))
+        } else if (scanRequest != null && quickTxItem != null) {
+            scanRequest = null
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        com.stockmaster.app.ui.components.AmbientBackdrop(Modifier.matchParentSize())
         when (currentNav.screen) {
             "main" -> Column(modifier = Modifier.fillMaxSize()) {
-                // ── 品牌精工顶栏 (Hardware Precision Titlebar) ──
+                // ── 品牌玻璃顶栏 (Glass Precision Titlebar) ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White)
+                        .background(Color.White.copy(alpha = 0.07f))
+                        .drawBehind {
+                            drawLine(
+                                color = Color.White.copy(alpha = 0.14f),
+                                start = Offset(0f, size.height),
+                                end = Offset(size.width, size.height),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
                         .statusBarsPadding()
-                        .border(0.5.dp, BorderLight.copy(alpha = 0.6f))
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -201,8 +216,8 @@ fun AppRoot(viewModel: MainViewModel) {
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFF1F5F9))
-                                .border(0.5.dp, BorderLight, RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.10f))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
                                 .clickable { navigateTo(Nav("search")) }
                                 .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -257,12 +272,25 @@ fun AppRoot(viewModel: MainViewModel) {
                     }
                 }
 
-                // ── 底部浮岛导航栏 ──
+                // ── 底部浮岛玻璃导航栏 ──
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White)
-                        .border(1.dp, BorderLight.copy(alpha = 0.6f))
+                        .background(Color(0xF00D1626))
+                        .drawBehind {
+                            drawLine(
+                                brush = Brush.horizontalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        Color.White.copy(alpha = 0.22f),
+                                        Color.Transparent
+                                    )
+                                ),
+                                start = Offset(0f, 0f),
+                                end = Offset(size.width, 0f),
+                                strokeWidth = 1.dp.toPx()
+                            )
+                        }
                         .navigationBarsPadding(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -292,11 +320,23 @@ fun AppRoot(viewModel: MainViewModel) {
                         Box(
                             modifier = Modifier
                                 .size(52.dp)
+                                .shadow(
+                                    elevation = 16.dp,
+                                    shape = RoundedCornerShape(16.dp),
+                                    clip = false,
+                                    ambientColor = Color.Transparent,
+                                    spotColor = Color(0xFF34D399).copy(alpha = 0.50f)
+                                )
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(
                                     Brush.verticalGradient(
-                                        listOf(GreenPrimary, Color(0xFF00A369))
+                                        listOf(Color(0xFF34D399), Color(0xFF059669))
                                     )
+                                )
+                                .border(
+                                    1.dp,
+                                    Color.White.copy(alpha = 0.45f),
+                                    RoundedCornerShape(16.dp)
                                 )
                                 .clickable { navigateTo(Nav("scan", TxType.IN.name)) },
                             contentAlignment = Alignment.Center
@@ -347,7 +387,8 @@ fun AppRoot(viewModel: MainViewModel) {
                 onClose = { popBack() },
                 onAddNewProductWithBarcode = { barcode -> navigateTo(Nav("add", barcode)) },
                 onScanCompletedWithItem = { itemId ->
-                    popBack()
+                    // 仅当栈顶确为 scan 页时弹出，避免盲目 dropLast 弹错页面
+                    if (navStack.lastOrNull()?.screen == "scan") popBack()
                     navigateTo(Nav("detail", itemId))
                 }
             )
@@ -454,7 +495,11 @@ fun AppRoot(viewModel: MainViewModel) {
                         )
                     )
                     if (!ok) {
-                        Toast.makeText(context, "库存不足，出库数量超出当前可用库存", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(
+                            context,
+                            viewModel.txRejectMessage ?: "库存不足，出库数量超出当前可用库存",
+                            Toast.LENGTH_SHORT
+                        ).show()
                         return@QuickTransactionDialog
                     }
                     quickTxItem = null
@@ -488,8 +533,15 @@ private fun BottomNavItem(
         Box(
             modifier = Modifier
                 .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(
-                    if (selected) GreenPrimary.copy(alpha = 0.1f) else Color.Transparent,
+                    if (selected) {
+                        Brush.verticalGradient(listOf(GreenPrimary.copy(alpha = 0.26f), GreenPrimary.copy(alpha = 0.12f)))
+                    } else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+                )
+                .border(
+                    1.dp,
+                    if (selected) GreenPrimary.copy(alpha = 0.45f) else Color.Transparent,
                     RoundedCornerShape(10.dp)
                 ),
             contentAlignment = Alignment.Center

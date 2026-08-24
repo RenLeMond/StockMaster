@@ -8,12 +8,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -35,10 +37,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -48,8 +55,9 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.text.font.FontFamily
 import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassBorderLo
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenPrimary
-import com.stockmaster.app.ui.theme.RedLight
 import com.stockmaster.app.ui.theme.RedPrimary
 import com.stockmaster.app.ui.theme.TextMuted
 import com.stockmaster.app.ui.theme.TextPrimary
@@ -57,11 +65,11 @@ import com.stockmaster.app.ui.theme.TextSecondary
 import com.stockmaster.app.util.Fmt
 import kotlinx.coroutines.delay
 
-/** 白底圆角卡片。 */
+/** 毛玻璃圆角卡片。 */
 @Composable
 fun AppCard(
     modifier: Modifier = Modifier,
-    borderColor: Color = BorderLight.copy(alpha = 0.5f),
+    borderColor: Color = Color.Transparent,
     cornerRadius: Dp = 16.dp,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
@@ -70,8 +78,13 @@ fun AppCard(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(Color.White)
-            .border(1.dp, borderColor, shape)
+            .background(Brush.verticalGradient(GlassDefaults.cardFill))
+            .glassBorder(cornerRadius)
+            .then(
+                if (borderColor != Color.Transparent) {
+                    Modifier.border(1.dp, borderColor, shape)
+                } else Modifier
+            )
             .then(
                 if (onClick != null) {
                     Modifier.clickable(onClick = onClick)
@@ -83,13 +96,13 @@ fun AppCard(
     }
 }
 
-/** 双层机加工嵌合卡片 (Double-Bezel Card)。 */
+/** 双层嵌合毛玻璃卡片 (Glass Double-Bezel Card)。 */
 @Composable
 fun DoubleBezelCard(
     modifier: Modifier = Modifier,
-    outerColor: Color = Color(0xFFF1F5F9),
-    outerBorderColor: Color = BorderLight.copy(alpha = 0.6f),
-    innerBorderColor: Color = BorderLight.copy(alpha = 0.3f),
+    outerColor: Color = Color.White.copy(alpha = 0.05f),
+    outerBorderColor: Color = GlassHairline,
+    innerBorderColor: Color = GlassBorderLo,
     outerRadius: Dp = 20.dp,
     innerRadius: Dp = 16.dp,
     innerPadding: Dp = 16.dp,
@@ -102,7 +115,7 @@ fun DoubleBezelCard(
         modifier = modifier
             .clip(outerShape)
             .background(outerColor)
-            .border(0.5.dp, outerBorderColor, outerShape)
+            .glassBorder(outerRadius, topColor = outerBorderColor, bottomColor = outerBorderColor.copy(alpha = 0.3f))
             .then(
                 if (onClick != null) {
                     Modifier.clickable(onClick = onClick)
@@ -114,8 +127,8 @@ fun DoubleBezelCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(innerShape)
-                .background(Color.White)
-                .border(0.5.dp, innerBorderColor, innerShape)
+                .background(Color.White.copy(alpha = 0.07f))
+                .glassBorder(innerRadius, topColor = innerBorderColor, bottomColor = innerBorderColor.copy(alpha = 0.4f))
                 .padding(innerPadding)
         ) {
             content()
@@ -174,14 +187,14 @@ fun MoneyDisplay(
     }
 }
 
-/** 嵌套式纽扣按钮 (Button-in-Button CTA)。 */
+/** 嵌套式纽扣按钮 (Glass CTA)。 */
 @Composable
 fun ButtonInButton(
     text: String,
     icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    backgroundColor: Color = GreenPrimary,
+    backgroundColor: Color = Color(0xFF0B7A55),
     textColor: Color = Color.White,
     iconBadgeColor: Color = Color.White.copy(alpha = 0.2f),
     iconTint: Color = Color.White,
@@ -220,7 +233,7 @@ fun ButtonInButton(
     }
 }
 
-/** 可选中胶囊 chip。 */
+/** 可选中玻璃胶囊 chip。 */
 @Composable
 fun SelectChip(
     text: String,
@@ -228,7 +241,7 @@ fun SelectChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     selectedColor: Color = GreenPrimary,
-    selectedTextColor: Color = Color.White,
+    selectedTextColor: Color = Color(0xFF04241A),
     leadingIcon: (@Composable () -> Unit)? = null
 ) {
     val shape = RoundedCornerShape(50)
@@ -236,11 +249,15 @@ fun SelectChip(
         modifier = modifier
             .clip(shape)
             .background(
-                if (selected) selectedColor else Color.White
+                if (selected) {
+                    Brush.verticalGradient(listOf(selectedColor.copy(alpha = 0.95f), selectedColor.copy(alpha = 0.72f)))
+                } else {
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.04f)))
+                }
             )
             .border(
                 1.dp,
-                if (selected) selectedColor else BorderLight.copy(alpha = 0.5f),
+                if (selected) selectedColor else Color.White.copy(alpha = 0.16f),
                 shape
             )
             .clickable(onClick = onClick)
@@ -258,43 +275,188 @@ fun SelectChip(
     }
 }
 
-/** 数量步进器。 */
+/** 数量步进器：± 按钮 + 中央可直接键入，编辑时可自由删除清空，失焦自动归一。 */
 @Composable
 fun QuantityStepper(
     value: Int,
     onValueChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
     min: Int = 1,
+    max: Int = Int.MAX_VALUE,
     accent: Color = GreenPrimary,
     boxSize: Dp = 46.dp
 ) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(value.toString()) }
+
+    fun commit(text: String) {
+        val n = text.filter { it.isDigit() }.take(6).toIntOrNull()
+        when {
+            n != null -> {
+                val clamped = n.coerceIn(min, max)
+                // 越界输入（如 min=1 时键入 0）立即把草稿吸附到合法值，
+                // 避免「编辑中显示 0、失焦后跳变 1」的观感断裂
+                if (clamped.toString() != text) draft = clamped.toString()
+                onValueChange(clamped)
+            }
+            text.isEmpty() -> onValueChange(min)
+        }
+    }
+
     Row(
         modifier = modifier,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         StepButton(icon = Icons.Filled.Remove, size = boxSize, tint = TextPrimary) {
-            onValueChange(maxOf(min, value - 1))
+            editing = false
+            onValueChange((value - 1).coerceAtLeast(min))
         }
         val centerShape = RoundedCornerShape(12.dp)
-        Box(
+        androidx.compose.foundation.text.BasicTextField(
+            value = if (editing) draft else value.toString(),
+            onValueChange = { input ->
+                draft = input.filter { it.isDigit() }.take(6)
+                editing = true
+                commit(input)
+            },
             modifier = Modifier
                 .size(width = 112.dp, height = boxSize)
                 .clip(centerShape)
-                .background(accent.copy(alpha = 0.05f))
-                .border(2.dp, accent, centerShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = value.toString(),
+                .background(accent.copy(alpha = 0.14f))
+                .border(1.5.dp, accent, centerShape)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        editing = true
+                        draft = value.toString()
+                    } else {
+                        editing = false
+                    }
+                },
+            textStyle = TextStyle(
                 color = accent,
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
-                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
-            )
-        }
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                textAlign = TextAlign.Center
+            ),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done
+            ),
+            singleLine = true,
+            cursorBrush = SolidColor(accent),
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    innerTextField()
+                }
+            }
+        )
         StepButton(icon = Icons.Filled.Add, size = boxSize, tint = TextPrimary) {
-            onValueChange(value + 1)
+            editing = false
+            onValueChange((value + 1).coerceAtMost(max))
+        }
+    }
+}
+
+/**
+ * 紧凑型数量步进输入框（± 按钮 + 可直接键入），用于表单中的整数数量字段。
+ * 编辑期间保留原始草稿文本可自由删除清空，失焦后回落为归一化数值。
+ */
+@Composable
+fun QuantityStepperField(
+    value: Int,
+    onValueChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    min: Int = 0,
+    max: Int = Int.MAX_VALUE,
+    height: Dp = 40.dp,
+    accent: Color = GreenPrimary,
+    placeholderText: String = "0"
+) {
+    var editing by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf(value.toString()) }
+    val btnSide = (height.value * 0.74f).dp
+    val btnIcon = (btnSide.value * 0.55f).dp
+
+    fun commit(text: String) {
+        val n = text.filter { it.isDigit() }.take(6).toIntOrNull()
+        when {
+            n != null -> {
+                val clamped = n.coerceIn(min, max)
+                // 越界输入（如 min=1 时键入 0）立即把草稿吸附到合法值，
+                // 避免「编辑中显示 0、失焦后跳变 1」的观感断裂
+                if (clamped.toString() != text) draft = clamped.toString()
+                onValueChange(clamped)
+            }
+            text.isEmpty() -> onValueChange(min)
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .height(height)
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .border(1.dp, GlassHairline, RoundedCornerShape(11.dp))
+            .padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        StepButton(icon = Icons.Filled.Remove, size = btnSide, tint = TextPrimary, iconSize = btnIcon) {
+            editing = false
+            onValueChange((value - 1).coerceAtLeast(min))
+        }
+        androidx.compose.foundation.text.BasicTextField(
+            value = if (editing) draft else value.toString(),
+            onValueChange = { input ->
+                draft = input.filter { it.isDigit() }.take(6)
+                editing = true
+                commit(input)
+            },
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp)
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        editing = true
+                        draft = value.toString()
+                    } else {
+                        editing = false
+                    }
+                },
+            textStyle = TextStyle(
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                textAlign = TextAlign.Center
+            ),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Done
+            ),
+            singleLine = true,
+            cursorBrush = SolidColor(accent),
+            decorationBox = { innerTextField ->
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (!editing && value <= 0 && placeholderText.isNotEmpty()) {
+                        Text(
+                            text = placeholderText,
+                            color = TextMuted,
+                            fontSize = 12.sp,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1
+                        )
+                    } else {
+                        innerTextField()
+                    }
+                }
+            }
+        )
+        StepButton(icon = Icons.Filled.Add, size = btnSide, tint = TextPrimary, iconSize = btnIcon) {
+            editing = false
+            onValueChange((value + 1).coerceAtMost(max))
         }
     }
 }
@@ -304,6 +466,7 @@ private fun StepButton(
     icon: ImageVector,
     size: Dp,
     tint: Color,
+    iconSize: Dp = 20.dp,
     onClick: () -> Unit
 ) {
     val shape = RoundedCornerShape(12.dp)
@@ -311,11 +474,12 @@ private fun StepButton(
         modifier = Modifier
             .size(size)
             .clip(shape)
-            .background(Color(0xFFF1F5F9))
+            .background(Color.White.copy(alpha = 0.09f))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), shape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(iconSize))
     }
 }
 
@@ -337,11 +501,15 @@ fun QuickStepRow(
                 modifier = Modifier
                     .clip(shape)
                     .background(
-                        if (isCurrent) GreenPrimary else Color.White
+                        if (isCurrent) {
+                            Brush.verticalGradient(listOf(GreenPrimary.copy(alpha = 0.95f), GreenPrimary.copy(alpha = 0.7f)))
+                        } else {
+                            Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.04f)))
+                        }
                     )
                     .border(
                         1.dp,
-                        if (isCurrent) GreenPrimary else BorderLight.copy(alpha = 0.5f),
+                        if (isCurrent) GreenPrimary else Color.White.copy(alpha = 0.16f),
                         shape
                     )
                     .clickable { onSelect(step) }
@@ -349,7 +517,7 @@ fun QuickStepRow(
             ) {
                 Text(
                     text = step.toString(),
-                    color = if (isCurrent) Color.White else TextSecondary,
+                    color = if (isCurrent) Color(0xFF04241A) else TextSecondary,
                     fontSize = 12.sp,
                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
                 )
@@ -373,8 +541,8 @@ fun EmptyState(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(Color.White)
-            .border(1.dp, BorderLight.copy(alpha = 0.6f), shape)
+            .background(Brush.verticalGradient(GlassDefaults.cardFill))
+            .glassBorder(20.dp)
             .padding(vertical = 40.dp, horizontal = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -382,13 +550,14 @@ fun EmptyState(
             modifier = Modifier
                 .size(64.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(GreenPrimary.copy(alpha = 0.08f)),
+                .background(GreenPrimary.copy(alpha = 0.14f))
+                .border(1.dp, GreenPrimary.copy(alpha = 0.35f), RoundedCornerShape(16.dp)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 icon,
                 contentDescription = null,
-                tint = GreenPrimary.copy(alpha = 0.7f),
+                tint = GreenPrimary.copy(alpha = 0.9f),
                 modifier = Modifier.size(32.dp)
             )
         }
@@ -409,7 +578,7 @@ fun EmptyState(
             Box(
                 modifier = Modifier
                     .clip(btnShape)
-                    .background(GreenPrimary)
+                    .background(Brush.verticalGradient(listOf(Color(0xFF10B981), Color(0xFF059669))))
                     .clickable(onClick = onAction)
                     .padding(horizontal = 20.dp, vertical = 10.dp)
             ) {
@@ -435,48 +604,29 @@ fun ConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.material3.Surface(
+    GlassDialogPanel(onDismissRequest = onDismiss) {
+        Column {
+            Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text(message, color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
+            Spacer(Modifier.height(22.dp))
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                shadowElevation = 8.dp
+                horizontalArrangement = Arrangement.End
             ) {
-                Column(
-                    modifier = Modifier.padding(22.dp)
-                ) {
-                    Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(10.dp))
-                    Text(message, color = TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
-                    Spacer(Modifier.height(22.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        if (cancelText.isNotBlank()) {
-                            TextButton(onClick = onDismiss) {
-                                Text(cancelText, color = TextSecondary)
-                            }
-                            Spacer(Modifier.size(8.dp))
-                        }
-                        TextButton(
-                            onClick = onConfirm,
-                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                contentColor = if (danger) RedPrimary else GreenPrimary
-                            )
-                        ) {
-                            Text(confirmText, fontWeight = FontWeight.Bold)
-                        }
+                if (cancelText.isNotBlank()) {
+                    TextButton(onClick = onDismiss) {
+                        Text(cancelText, color = TextSecondary)
                     }
+                    Spacer(Modifier.size(8.dp))
+                }
+                TextButton(
+                    onClick = onConfirm,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = if (danger) RedPrimary else GreenPrimary
+                    )
+                ) {
+                    Text(confirmText, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -505,73 +655,54 @@ fun InputDialog(
         } catch (_: Exception) {}
     }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            androidx.compose.material3.Surface(
+    GlassDialogPanel(onDismissRequest = onDismiss) {
+        Column {
+            Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+            if (message.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Text(message, color = TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
+            }
+            Spacer(Modifier.height(14.dp))
+            SMTextField(
+                value = text,
+                onValueChange = { text = it },
+                placeholder = placeholder,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                imeAction = ImeAction.Done,
+                keyboardActions = KeyboardActions(
+                    onDone = {
+                        val clean = text.trim()
+                        if (clean.isNotEmpty()) {
+                            onConfirm(clean)
+                        }
+                    }
+                )
+            )
+            Spacer(Modifier.height(20.dp))
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = Color.White,
-                shadowElevation = 8.dp
+                horizontalArrangement = Arrangement.End
             ) {
-                Column(
-                    modifier = Modifier.padding(22.dp)
-                ) {
-                    Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    if (message.isNotBlank()) {
-                        Spacer(Modifier.height(8.dp))
-                        Text(message, color = TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
+                if (cancelText.isNotBlank()) {
+                    TextButton(onClick = onDismiss) {
+                        Text(cancelText, color = TextSecondary)
                     }
-                    Spacer(Modifier.height(14.dp))
-                    SMTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        placeholder = placeholder,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester),
-                        imeAction = ImeAction.Done,
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                val clean = text.trim()
-                                if (clean.isNotEmpty()) {
-                                    onConfirm(clean)
-                                }
-                            }
-                        )
+                    Spacer(Modifier.size(8.dp))
+                }
+                TextButton(
+                    onClick = {
+                        val clean = text.trim()
+                        if (clean.isNotEmpty()) {
+                            onConfirm(clean)
+                        }
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = GreenPrimary
                     )
-                    Spacer(Modifier.height(20.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        if (cancelText.isNotBlank()) {
-                            TextButton(onClick = onDismiss) {
-                                Text(cancelText, color = TextSecondary)
-                            }
-                            Spacer(Modifier.size(8.dp))
-                        }
-                        TextButton(
-                            onClick = {
-                                val clean = text.trim()
-                                if (clean.isNotEmpty()) {
-                                    onConfirm(clean)
-                                }
-                            },
-                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                contentColor = GreenPrimary
-                            )
-                        ) {
-                            Text(confirmText, fontWeight = FontWeight.Bold)
-                        }
-                    }
+                ) {
+                    Text(confirmText, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -590,12 +721,12 @@ fun SMDropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
         modifier = modifier
-            .background(Color.White, RoundedCornerShape(16.dp))
-            .border(1.dp, BorderLight.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .background(Color(0xFF152036), RoundedCornerShape(16.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(16.dp))
             .padding(vertical = 4.dp),
         shape = RoundedCornerShape(16.dp),
-        containerColor = Color.White,
-        shadowElevation = 6.dp,
+        containerColor = Color(0xFF152036),
+        shadowElevation = 12.dp,
         content = content
     )
 }

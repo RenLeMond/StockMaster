@@ -53,6 +53,7 @@ import com.stockmaster.app.ui.theme.BgMain
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenPrimary
 import com.stockmaster.app.ui.theme.RedBorder
 import com.stockmaster.app.ui.theme.RedLight
@@ -146,13 +147,13 @@ fun CategoryLocationScreen(
         )
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(BgMain)) {
+    Column(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Color.White)
+                .background(Color.White.copy(alpha = 0.07f))
                 .statusBarsPadding()
-                .border(0.5.dp, BorderLight.copy(alpha = 0.5f))
+                .border(0.5.dp, GlassHairline)
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -161,7 +162,7 @@ fun CategoryLocationScreen(
                 modifier = Modifier
                     .size(38.dp)
                     .clip(backShape)
-                    .background(Color(0xFFF1F5F9))
+                    .background(Color.White.copy(alpha = 0.08f))
                     .clickable(onClick = onClose),
                 contentAlignment = Alignment.Center
             ) {
@@ -176,8 +177,8 @@ fun CategoryLocationScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
-                .background(Color.White, RoundedCornerShape(14.dp))
-                .border(1.dp, BorderLight.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
                 .padding(4.dp)
         ) {
             listOf("商品分类" to Icons.Filled.Layers, "存放库位" to Icons.Filled.LocationOn).forEachIndexed { index, (label, icon) ->
@@ -268,8 +269,8 @@ fun CategoryLocationScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(itemShape)
-                            .background(Color.White)
-                            .border(1.dp, BorderLight.copy(alpha = 0.4f), itemShape)
+                            .background(Color.White.copy(alpha = 0.07f))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), itemShape)
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

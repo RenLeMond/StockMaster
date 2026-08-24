@@ -3,6 +3,7 @@ package com.stockmaster.app.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,13 +35,17 @@ import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -49,20 +54,24 @@ import androidx.compose.ui.unit.sp
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.TxType
 import com.stockmaster.app.ui.components.FieldLabel
+import com.stockmaster.app.ui.components.GlassDefaults
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.QuantityStepper
+import com.stockmaster.app.ui.components.QuantityStepperField
 import com.stockmaster.app.ui.components.QuickStepRow
 import com.stockmaster.app.ui.components.SMDropdownMenu
 import com.stockmaster.app.ui.components.SMDropdownMenuItem
 import com.stockmaster.app.ui.components.SMNumberField
 import com.stockmaster.app.ui.components.SMTextField
-import com.stockmaster.app.ui.theme.BgMain
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.theme.BlueAccent
-import com.stockmaster.app.ui.theme.BorderLight
+import com.stockmaster.app.ui.theme.GlassHairline
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
+import com.stockmaster.app.ui.theme.RedBorder
 import com.stockmaster.app.ui.theme.RedLight
 import com.stockmaster.app.ui.theme.RedPrimary
+import com.stockmaster.app.ui.theme.ScrimDrawer
 import com.stockmaster.app.ui.theme.TextMuted
 import com.stockmaster.app.ui.theme.TextPrimary
 import com.stockmaster.app.ui.theme.TextSecondary
@@ -96,25 +105,52 @@ fun ScanResultDrawer(
     onDismiss: () -> Unit,
     onAddNewProduct: () -> Unit
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(max = 560.dp)
-            .background(BgMain, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
-            .border(
-                1.dp,
-                BorderLight.copy(alpha = 0.6f),
-                RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-            )
-    ) {
-        // 拖拽指示条
+    // 输入框的原始编辑文本：避免「删空/中间态被立即解析回写为 0」吞掉正在输入的内容
+    var costEdit by remember(mode, item?.id) { mutableStateOf<String?>(null) }
+    var priceEdit by remember(mode, item?.id) { mutableStateOf<String?>(null) }
+
+    // 出库时 0 库存尺码被隐藏，其配比条目若残留在 sizeBreakdown 中，
+    // 会污染确认按钮的合计与 VM 校验；随可见集合变化清理不可见尺码的条目
+    val currentBreakdown by rememberUpdatedState(sizeBreakdown)
+    val currentOnBreakdownChange by rememberUpdatedState(onSizeBreakdownChange)
+    LaunchedEffect(mode, item?.id) {
+        if (mode == TxType.OUT && item != null) {
+            val keep = item.sizeVariants.filter { it.stock > 0 }.map { it.size }.toSet()
+            val cleaned = currentBreakdown.filterKeys { it in keep }
+            if (cleaned.size != currentBreakdown.size) currentOnBreakdownChange(cleaned)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // 深色模糊感遮罩（Scrim Backdrop）
         Box(
             modifier = Modifier
-                .align(Alignment.CenterHorizontally)
-                .padding(top = 10.dp)
-                .size(width = 40.dp, height = 4.dp)
-                .background(Color(0xFFD0D8E8), RoundedCornerShape(50))
+                .fillMaxSize()
+                .background(Brush.verticalGradient(listOf(Color(0x59040A16), ScrimDrawer)))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss
+                )
         )
+
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .heightIn(max = 560.dp)
+                .clip(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp))
+                .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                .glassBorder(26.dp)
+        ) {
+            // 拖拽指示条
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .padding(top = 10.dp)
+                    .size(width = 40.dp, height = 4.dp)
+                    .background(Color.White.copy(alpha = 0.32f), RoundedCornerShape(50))
+            )
 
         // 头部
         Row(
@@ -147,7 +183,8 @@ fun ScanResultDrawer(
                 modifier = Modifier
                     .size(32.dp)
                     .clip(closeBtnShape)
-                    .background(Color.White)
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(1.dp, Color.White.copy(alpha = 0.16f), closeBtnShape)
                     .clickable(onClick = onDismiss),
                 contentAlignment = Alignment.Center
             ) {
@@ -174,13 +211,14 @@ fun ScanResultDrawer(
                     Box(
                         modifier = Modifier
                             .size(56.dp)
-                            .background(Color(0xFFFFF3CD), RoundedCornerShape(16.dp)),
+                            .background(Color(0x2EFBBF24), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color(0x59FBBF24), RoundedCornerShape(16.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Filled.WarningAmber,
                             contentDescription = null,
-                            tint = Color(0xFFB45309),
+                            tint = Color(0xFFFBBF24),
                             modifier = Modifier.size(30.dp)
                         )
                     }
@@ -191,8 +229,8 @@ fun ScanResultDrawer(
                         Text("识别条码: ", color = TextSecondary, fontSize = 12.sp)
                         Box(
                             modifier = Modifier
-                                .background(Color.White, RoundedCornerShape(6.dp))
-                                .border(1.dp, BorderLight.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+                                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(6.dp))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         ) {
                             Text(
@@ -233,8 +271,8 @@ fun ScanResultDrawer(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Color.White, RoundedCornerShape(16.dp))
-                        .border(1.dp, BorderLight.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -306,13 +344,18 @@ fun ScanResultDrawer(
 
                 Spacer(Modifier.height(14.dp))
 
-                // 尺码选择
+                // 尺码选择（出库时隐藏 0 库存尺码；入库保留全部以便补货）
                 if (item.hasSizes && item.sizeVariants.isNotEmpty()) {
+                    val visibleVariants = if (mode == TxType.OUT) {
+                        item.sizeVariants.filter { it.stock > 0 }
+                    } else {
+                        item.sizeVariants
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(16.dp))
-                            .border(1.dp, BorderLight.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                             .padding(14.dp)
                     ) {
                         Row(
@@ -352,10 +395,17 @@ fun ScanResultDrawer(
                         Spacer(Modifier.height(12.dp))
 
                         if (!isBatchSizeScan) {
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(item.sizeVariants) { v ->
+                            if (visibleVariants.isEmpty()) {
+                                Text(
+                                    "所有尺码均无库存，无法出库",
+                                    color = TextMuted,
+                                    fontSize = 11.sp
+                                )
+                            } else {
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    items(visibleVariants) { v ->
                                     val isSelected = selectedSize == v.size
                                     val isOut = v.stock <= 0
                                     val chipShape = RoundedCornerShape(12.dp)
@@ -366,15 +416,15 @@ fun ScanResultDrawer(
                                                 when {
                                                     isSelected -> GreenPrimary
                                                     isOut -> RedLight.copy(alpha = 0.3f)
-                                                    else -> BgMain
+                                                    else -> Color.White.copy(alpha = 0.08f)
                                                 }
                                             )
                                             .border(
                                                 1.dp,
                                                 when {
                                                     isSelected -> GreenPrimary
-                                                    isOut -> RedPrimary.copy(alpha = 0.3f)
-                                                    else -> BorderLight.copy(alpha = 0.6f)
+                                                    isOut -> RedBorder
+                                                    else -> Color.White.copy(alpha = 0.16f)
                                                 },
                                                 chipShape
                                             )
@@ -396,35 +446,34 @@ fun ScanResultDrawer(
                                             fontFamily = FontFamily.Monospace
                                         )
                                     }
+                                    }
                                 }
                             }
                         } else {
-                            // 批量配比
+                            // 批量配比（出库时同样只列出有库存的尺码）
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                item.sizeVariants.forEach { v ->
+                                visibleVariants.forEach { v ->
                                     Column(
                                         modifier = Modifier
-                                            .background(Color.White, RoundedCornerShape(12.dp))
-                                            .border(1.dp, BorderLight.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                                             .padding(10.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         Text(v.size, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         Text("余${v.stock}", color = TextMuted, fontSize = 10.sp)
                                         Spacer(Modifier.height(6.dp))
-                                        SMNumberField(
-                                            value = (sizeBreakdown[v.size] ?: 0).toString(),
-                                            onValueChange = { input ->
-                                                val num = input.toIntOrNull()?.coerceAtLeast(0) ?: 0
+                                        QuantityStepperField(
+                                            value = sizeBreakdown[v.size] ?: 0,
+                                            onValueChange = { num ->
                                                 onSizeBreakdownChange(sizeBreakdown + (v.size to num))
                                             },
                                             height = 34.dp,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                            bold = true,
-                                            modifier = Modifier.width(64.dp)
+                                            accent = BlueAccent,
+                                            modifier = Modifier.width(96.dp)
                                         )
                                     }
                                 }
@@ -439,8 +488,8 @@ fun ScanResultDrawer(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color.White, RoundedCornerShape(16.dp))
-                            .border(1.dp, BorderLight.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
@@ -472,10 +521,14 @@ fun ScanResultDrawer(
                     Column(modifier = Modifier.weight(1f)) {
                         FieldLabel(if (mode == TxType.IN) "进货单价 (¥)" else "销售单价 (¥)")
                         SMNumberField(
-                            value = (if (mode == TxType.IN) unitCost else unitPrice).toString(),
+                            value = if (mode == TxType.IN) (costEdit ?: unitCost.toString())
+                                else (priceEdit ?: unitPrice.toString()),
                             onValueChange = { input ->
-                                val num = input.toDoubleOrNull()?.coerceAtLeast(0.0) ?: 0.0
-                                if (mode == TxType.IN) onCostChange(num) else onPriceChange(num)
+                                if (mode == TxType.IN) costEdit = input else priceEdit = input
+                                input.toDoubleOrNull()?.let {
+                                    if (mode == TxType.IN) onCostChange(it.coerceAtLeast(0.0))
+                                    else onPriceChange(it.coerceAtLeast(0.0))
+                                }
                             },
                             decimal = true,
                             bold = true,
@@ -492,8 +545,8 @@ fun ScanResultDrawer(
                                     .fillMaxWidth()
                                     .height(40.dp)
                                     .clip(locShape)
-                                    .background(Color.White)
-                                    .border(1.dp, BorderLight.copy(alpha = 0.6f), locShape)
+                                    .background(Color.White.copy(alpha = 0.07f))
+                                    .border(1.dp, GlassHairline, locShape)
                                     .clickable { menuOpen = true }
                                     .padding(horizontal = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -565,9 +618,26 @@ fun ScanResultDrawer(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .shadow(
+                            elevation = 14.dp,
+                            shape = confirmBtnShape,
+                            clip = false,
+                            ambientColor = Color.Transparent,
+                            spotColor = accent.copy(alpha = if (totalQty > 0) 0.40f else 0f)
+                        )
                         .clip(confirmBtnShape)
                         .background(
-                            if (totalQty <= 0) Color(0xFFD0D0D0) else accent
+                            if (totalQty <= 0) {
+                                Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.05f)))
+                            } else {
+                                Brush.verticalGradient(listOf(accent.copy(alpha = 0.95f), accent.copy(alpha = 0.70f)))
+                            }
+                        )
+                        .glassBorder(16.dp)
+                        .border(
+                            1.dp,
+                            if (totalQty <= 0) Color.Transparent else accent,
+                            confirmBtnShape
                         )
                         .clickable(enabled = totalQty > 0, onClick = onConfirm)
                         .padding(vertical = 15.dp),
@@ -587,7 +657,7 @@ fun ScanResultDrawer(
                             Icon(
                                 Icons.Filled.Check,
                                 contentDescription = null,
-                                tint = if (totalQty <= 0) Color(0xFF9E9E9E) else Color.White,
+                                tint = if (totalQty <= 0) Color.White.copy(alpha = 0.40f) else Color.White,
                                 modifier = Modifier.size(17.dp)
                             )
                         }
@@ -595,13 +665,14 @@ fun ScanResultDrawer(
                             "确认${if (mode == TxType.IN) "入库" else "出库"} ($totalQty ${item.unit}" +
                                 (if (selectedSize != null && !isBatchSizeScan) " · $selectedSize" else "") +
                                 " · 总计 ${Fmt.money(totalQty * (if (mode == TxType.IN) unitCost else unitPrice))})",
-                            color = if (totalQty <= 0) Color(0xFF9E9E9E) else Color.White,
+                            color = if (totalQty <= 0) Color.White.copy(alpha = 0.40f) else Color.White,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
             }
+        }
         }
     }
 }
