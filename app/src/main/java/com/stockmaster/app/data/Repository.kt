@@ -4,11 +4,16 @@ import android.content.Context
 import android.util.Log
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
+import com.stockmaster.app.util.ImageUtils
 import java.io.File
 
 /**
  * 本地 JSON 文件持久化仓库。
  * 对应原 Web 版 localStorage + IndexedDB 的存储语义。
+ *
+ * 同步语义：所有方法均 [@Synchronized]（基于同一 Repository 实例的可重入锁），
+ * 因此 [loadCategories]/[loadLocations] 内部调用 [saveCategories]/[saveLocations] 为可重入递归，
+ * 不会死锁；若后续迁移至 [kotlinx.coroutines.sync.Mutex]，需改为非重入的挂起函数并避免锁内递归。
  */
 class Repository(private val context: Context) {
 
@@ -82,5 +87,5 @@ class Repository(private val context: Context) {
     }
 
     /** 供 clearAll 等场景清理商品图片目录。 */
-    fun imagesDir(): File = File(context.filesDir, "images")
+    fun imagesDir(): File = ImageUtils.imagesDir(context)
 }

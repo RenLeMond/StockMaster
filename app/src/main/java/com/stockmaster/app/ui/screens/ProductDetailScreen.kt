@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -74,7 +75,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.SizeVariant
 import com.stockmaster.app.data.TransactionRecord
@@ -96,6 +96,7 @@ import com.stockmaster.app.ui.components.SMNumberField
 import com.stockmaster.app.ui.components.SMTextArea
 import com.stockmaster.app.ui.components.SMTextField
 import com.stockmaster.app.ui.components.SelectChip
+import com.stockmaster.app.ui.components.rememberTakePhotoAction
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderLight
@@ -118,8 +119,10 @@ import com.stockmaster.app.util.ImageUtils
 import java.io.File
 import java.time.LocalDateTime
 import java.util.Locale
+import java.util.UUID
 
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** 商品详情 / 编辑页。 */
 @OptIn(ExperimentalLayoutApi::class)
@@ -192,8 +195,12 @@ private fun DetailView(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    val barcodeBitmap: Bitmap? = remember(item.barcode) {
-        if (item.barcode.isNotBlank()) BarcodeBitmap.generate(item.barcode) else null
+    // 条码位图较重（4096px 矩阵），异步生成避免主线程 16ms+ 卡顿
+    var barcodeBitmap by remember(item.barcode) { mutableStateOf<Bitmap?>(null) }
+    androidx.compose.runtime.LaunchedEffect(item.barcode) {
+        barcodeBitmap = if (item.barcode.isBlank()) null else withContext(kotlinx.coroutines.Dispatchers.Default) {
+            BarcodeBitmap.generate(item.barcode)
+        }
     }
     val isLow = item.isLowStock
 
@@ -612,13 +619,15 @@ private fun DetailView(
                                 .padding(12.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Image(
-                                bitmap = barcodeBitmap.asImageBitmap(),
-                                contentDescription = "条形码",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(72.dp)
-                            )
+                            barcodeBitmap?.let { bmp ->
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "条形码",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(72.dp)
+                                )
+                            }
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 item.barcode,
@@ -828,9 +837,9 @@ private fun EditView(
 
     // 拍照
     val scope = rememberCoroutineScope()
-    // 惰性创建：不在组合期做磁盘 IO；离开编辑时清理残留临时文件
-    val tempPhoto = remember { File(context.cacheDir, "edit_capture_${System.currentTimeMillis()}.jpg") }
-    androidx.compose.runtime.DisposableEffect(tempPhoto) {
+    // 惰性创建：不在组合期做磁盘 IO；文件名含 UUID 避免 1ms 内重名 + 离开编辑时清理残留
+    val tempPhoto = remember { File(context.cacheDir, "edit_capture_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg") }
+    DisposableEffect(tempPhoto) {
         onDispose { if (tempPhoto.exists()) tempPhoto.delete() }
     }
     val takePictureLauncher = rememberLauncherForActivityResult(
@@ -844,6 +853,10 @@ private fun EditView(
             }
         }
     }
+
+    // 拍照动作：权限检查/申请与 FileProvider Uri 构造统一收口在共享组件
+    val startTakePhoto = rememberTakePhotoAction { uri -> takePictureLauncher.launch(uri) }
+
     // 相册选取
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -1087,15 +1100,7 @@ private fun EditView(
                                     .weight(1f)
                                     .clip(camShape)
                                     .background(GreenLight.copy(alpha = 0.2f))
-                                    .clickable {
-                                        takePictureLauncher.launch(
-                                            FileProvider.getUriForFile(
-                                                context,
-                                                "${context.packageName}.fileprovider",
-                                                tempPhoto
-                                            )
-                                        )
-                                    }
+                                    .clickable { startTakePhoto(tempPhoto) }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {

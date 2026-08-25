@@ -45,8 +45,9 @@ object Fmt {
 
     /** 相对时间展示：今天显示"今天 HH:mm"，历史日期显示"x年x月x日 HH:mm"。 */
     fun formattedTime(timestamp: String): String {
+        // 统一使用系统时区比较，避免跨时区备份恢复后日期错位
         val dt = parseIso(timestamp) ?: return ""
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now(ZoneId.systemDefault())
         val time = timeFormatter.format(dt)
         return if (dt.toLocalDate() == now.toLocalDate()) {
             "今天 $time"
@@ -58,7 +59,7 @@ object Fmt {
     /** 历史分组的日期标题。 */
     fun dateGroupLabel(timestamp: String): String {
         val dt = parseIso(timestamp) ?: return ""
-        val today = LocalDateTime.now()
+        val today = LocalDateTime.now(ZoneId.systemDefault())
         val yesterday = today.minusDays(1)
         val date = dt.toLocalDate()
         val label = "${dt.year}年${dt.monthValue}月${dt.dayOfMonth}日"
@@ -72,6 +73,7 @@ object Fmt {
     /** 月份选项：2026年 8月 */
     fun monthLabel(timestamp: String): String {
         val dt = parseIso(timestamp) ?: return ""
+        // parseIso 已换算至 systemDefault，此处无需再转区
         return "${dt.year}年 ${dt.monthValue}月"
     }
 }

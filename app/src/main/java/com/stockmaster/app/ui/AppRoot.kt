@@ -400,11 +400,20 @@ fun AppRoot(viewModel: MainViewModel) {
                 onSave = { viewModel.addItem(it) },
                 onClose = { popBack() },
                 onSaved = {
-                    popBack()
-                    Toast.makeText(context, "商品档案已创建", Toast.LENGTH_SHORT).show()
+                    // 带条码参数 = 从扫码工作台进入的新增：庆祝结束后退出扫码页并切到库存清单；
+                    // 普通入口（库存页录入商品）保持原样仅返回上一页。
+                    // 庆祝卡片本身已展示「商品档案已创建」，该路径不再重复弹 Toast
+                    if (currentNav.param != null) {
+                        navStack = listOf(Nav("main"))
+                        tab = 1
+                    } else {
+                        popBack()
+                        Toast.makeText(context, "商品档案已创建", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 onAddCategory = { viewModel.addCategory(it) },
-                onAddLocation = { viewModel.addLocation(it) }
+                onAddLocation = { viewModel.addLocation(it) },
+                celebrateOnSave = currentNav.param != null
             )
 
             "detail" -> {

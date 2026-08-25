@@ -1,9 +1,12 @@
 package com.stockmaster.app.ui
 
 import android.app.Application
+import android.util.Base64
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.stockmaster.app.data.BackupBundle
+import com.stockmaster.app.data.BackupImageEntry
 import com.stockmaster.app.data.BackupManager
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.PRESET_CATEGORIES
@@ -51,6 +54,10 @@ data class TxDraft(
  * - 启动异步加载完成后与内存态做并集合并，加载窗口内的用户/扫码枪写入不会丢失。
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    private companion object {
+        const val TAG_VM = "MainViewModel"
+    }
 
     private val repo = Repository(app)
 
@@ -281,11 +288,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun importItems(imported: List<InventoryItem>) {
         if (imported.isEmpty()) return
         val current = _items.value.toMutableList()
-        val currentSkus = current.associateBy { it.sku.lowercase() }.toMutableMap()
+        // 空 SKU 不参与去重（避免 "" 碰撞覆盖），仅以有效 SKU 建索引
+        val currentSkus = current.filter { it.sku.isNotBlank() }.associateBy { it.sku.lowercase() }.toMutableMap()
         val currentBarcodes = current.filter { it.barcode.isNotBlank() }.associateBy { it.barcode.lowercase() }.toMutableMap()
 
         imported.forEach { item ->
-            val existing = currentSkus[item.sku.lowercase()] ?: if (item.barcode.isNotBlank()) currentBarcodes[item.barcode.lowercase()] else null
+            val existing = if (item.sku.isNotBlank()) currentSkus[item.sku.lowercase()] else null
+                ?: if (item.barcode.isNotBlank()) currentBarcodes[item.barcode.lowercase()] else null
             if (existing != null) {
                 val index = current.indexOfFirst { it.id == existing.id }
                 if (index != -1) {
@@ -306,7 +315,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             } else {
                 current.add(0, item)
-                currentSkus[item.sku.lowercase()] = item
+                if (item.sku.isNotBlank()) currentSkus[item.sku.lowercase()] = item
                 if (item.barcode.isNotBlank()) currentBarcodes[item.barcode.lowercase()] = item
             }
         }
@@ -344,10 +353,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
 
+            // 物化备份内嵌图片到当前设备私有目录并重映射 file:// 路径（磁盘 IO，留在 IO 线程）
+            val restoredItems = materializeEmbeddedImages(
+                list = bundle.items,
+                embedded = bundle.images,
+                urlOf = { it.imageUrl },
+                copy = { it, u -> it.copy(imageUrl = u) }
+            )
+            val restoredTxs = materializeEmbeddedImages(
+                list = bundle.transactions,
+                embedded = bundle.images,
+                urlOf = { it.imageUrl },
+                copy = { it, u -> it.copy(imageUrl = u) }
+            )
+
             withContext(Dispatchers.Main.immediate) {
                 // 状态写回收敛主线程：消除与主线程读改写的跨线程竞态
-                _items.value = bundle.items
-                _transactions.value = bundle.transactions
+                _items.value = restoredItems
+                _transactions.value = restoredTxs
                 _categories.value = bundle.categories
                 _locations.value = bundle.locations
             }
@@ -357,7 +380,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             requestPersistLocations()
 
             withContext(Dispatchers.Main) {
-                onResult(Result.success(bundle))
+                // 返回物化后的副本而非原始 bundle：items/transactions 的 file:// 路径
+                // 已重映射到本机，调用方拿到即与当前内存状态一致
+                onResult(Result.success(bundle.copy(items = restoredItems, transactions = restoredTxs)))
             }
         }
     }
@@ -448,6 +473,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (file.absolutePath.startsWith(dir.absolutePath)) {
             viewModelScope.launch(Dispatchers.IO) { file.delete() }
         }
+    }
+
+    /**
+     * 恢复备份时物化内嵌图片：把备份包中的 Base64 图片写回当前设备私有目录，
+     * 并将条目上的 file:// 绝对路径重映射为当前设备的真实路径。
+     *
+     * - 同机恢复：同名文件已存在则直接复用，不重复写入
+     * - 跨设备/重装恢复：文件缺失时从内嵌载荷还原，URL 指向新路径
+     * - 旧格式备份（无 images 键）：整体保持原样返回（同机恢复时绝对路径仍有效，
+     *   跨设备本就无图可救，交由图片加载失败的占位兜底）
+     * - 有载荷但对应条目缺失/解码写盘失败：清空该条目图片引用，避免留下永远加载失败的脏路径
+     *
+     * 涉及磁盘 IO，须在 IO 线程调用。
+     */
+    private fun <T> materializeEmbeddedImages(
+        list: List<T>,
+        embedded: List<BackupImageEntry>,
+        urlOf: (T) -> String,
+        copy: (T, String) -> T
+    ): List<T> {
+        // 旧格式备份：保持原样（同机恢复时绝对路径仍有效，跨设备本就无图可救）
+        if (embedded.isEmpty()) return list
+        val dir = repo.imagesDir()
+        if (!dir.exists()) dir.mkdirs()
+        val byName = embedded.associateBy { it.name }
+        var changed = false
+        val out = list.map { entry ->
+            val url = urlOf(entry)
+            if (!url.startsWith("file://")) return@map entry
+            val name = File(url.removePrefix("file://")).name
+            // 空文件名会解析出目录本身（File(dir, "") == dir），必须按无效引用处理
+            if (name.isBlank()) {
+                changed = true
+                return@map copy(entry, "")
+            }
+            val target = File(dir, name)
+            if (!target.exists()) {
+                byName[name]?.let { e ->
+                    runCatching {
+                        val bytes = Base64.decode(e.b64, Base64.NO_WRAP)
+                        if (bytes.isNotEmpty()) target.writeBytes(bytes)
+                    }.onFailure {
+                        Log.w(TAG_VM, "恢复备份物化图片失败: $name", it)
+                    }
+                }
+            }
+            if (target.exists()) {
+                val newUrl = "file://${target.absolutePath}"
+                if (newUrl != url) changed = true
+                copy(entry, newUrl)
+            } else {
+                changed = true
+                copy(entry, "")
+            }
+        }
+        return if (changed) out else list
     }
 
     private fun nowIso() = LocalDateTime.now().toString()

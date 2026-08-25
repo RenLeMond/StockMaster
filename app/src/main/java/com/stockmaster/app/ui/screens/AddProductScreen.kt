@@ -2,6 +2,7 @@ package com.stockmaster.app.ui.screens
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -49,23 +50,29 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.SizeVariant
 import com.stockmaster.app.data.COMMON_UNITS
@@ -73,15 +80,19 @@ import com.stockmaster.app.data.SIZE_PRESET_LABELS
 import com.stockmaster.app.data.SIZE_PRESETS
 import com.stockmaster.app.ui.components.AppCard
 import com.stockmaster.app.ui.components.ConfirmDialog
+import com.stockmaster.app.ui.components.ConfettiFireworksEffect
+import com.stockmaster.app.ui.components.GlassDefaults
 import com.stockmaster.app.ui.components.InputDialog
 import com.stockmaster.app.ui.components.FieldLabel
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.PhotoViewerDialog
 import com.stockmaster.app.ui.components.QuantityStepperField
 import com.stockmaster.app.ui.components.SMNumberField
+import com.stockmaster.app.ui.components.glassBorder
 import com.stockmaster.app.ui.components.SMTextArea
 import com.stockmaster.app.ui.components.SMTextField
 import com.stockmaster.app.ui.components.SelectChip
+import com.stockmaster.app.ui.components.rememberTakePhotoAction
 import com.stockmaster.app.ui.theme.BgMain
 import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
@@ -111,7 +122,9 @@ fun AddProductScreen(
     onClose: () -> Unit,
     onSaved: () -> Unit,
     onAddCategory: ((String) -> Unit)? = null,
-    onAddLocation: ((String) -> Unit)? = null
+    onAddLocation: ((String) -> Unit)? = null,
+    // 从扫码流程进入（带条码参数）时保存成功播放烟花庆祝，随后由 onSaved 导航
+    celebrateOnSave: Boolean = false
 ) {
     val context = LocalContext.current
 
@@ -133,10 +146,10 @@ fun AddProductScreen(
     var location by remember { mutableStateOf("") }
     // 异步加载完成后仅在尚未选择时填充默认项；
     // 不能以列表实例作为 remember key——否则用户新建分类/库位后选中态会被立即重置
-    androidx.compose.runtime.LaunchedEffect(categories) {
+    LaunchedEffect(categories) {
         if (category.isBlank()) category = categories.firstOrNull() ?: ""
     }
-    androidx.compose.runtime.LaunchedEffect(locations) {
+    LaunchedEffect(locations) {
         if (location.isBlank()) location = locations.firstOrNull() ?: ""
     }
     var unit by remember { mutableStateOf("件") }
@@ -144,6 +157,9 @@ fun AddProductScreen(
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var showAddLocationDialog by remember { mutableStateOf(false) }
     var showPhotoViewer by remember { mutableStateOf(false) }
+    // 保存成功庆祝浮层（扫码流程专用）
+    var showSaveCelebration by remember { mutableStateOf(false) }
+    var celebrationInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     if (showPhotoViewer && !imageBase64.isNullOrEmpty()) {
         PhotoViewerDialog(
@@ -168,9 +184,9 @@ fun AddProductScreen(
 
     // 拍照
     val scope = rememberCoroutineScope()
-    // 惰性创建：不在组合期做磁盘 IO；离开页面时清理残留临时文件
-    val tempPhoto = remember { File(context.cacheDir, "capture_${System.currentTimeMillis()}.jpg") }
-    androidx.compose.runtime.DisposableEffect(tempPhoto) {
+    // 惰性创建：不在组合期做磁盘 IO；文件名含 UUID 避免 1ms 内重名 + 离开页面时清理残留
+    val tempPhoto = remember { File(context.cacheDir, "capture_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg") }
+    DisposableEffect(tempPhoto) {
         onDispose { if (tempPhoto.exists()) tempPhoto.delete() }
     }
     val takePictureLauncher = rememberLauncherForActivityResult(
@@ -184,6 +200,10 @@ fun AddProductScreen(
             }
         }
     }
+
+    // 拍照动作：权限检查/申请与 FileProvider Uri 构造统一收口在共享组件
+    val startTakePhoto = rememberTakePhotoAction { uri -> takePictureLauncher.launch(uri) }
+
     // 相册选取
     val galleryLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -286,7 +306,12 @@ fun AddProductScreen(
                 )
             )
             if (saved) {
-                onSaved()
+                if (celebrateOnSave) {
+                    celebrationInfo = cleanName to finalSku
+                    showSaveCelebration = true
+                } else {
+                    onSaved()
+                }
                 return
             }
             attempt++
@@ -339,6 +364,7 @@ fun AddProductScreen(
         )
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(modifier = Modifier.fillMaxSize()) {
         // 顶部导航栏
         Row(
@@ -462,15 +488,7 @@ fun AddProductScreen(
                                     .weight(1f)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(GreenLight.copy(alpha = 0.2f))
-                                    .clickable {
-                                        takePictureLauncher.launch(
-                                            FileProvider.getUriForFile(
-                                                context,
-                                                "${context.packageName}.fileprovider",
-                                                tempPhoto
-                                            )
-                                        )
-                                    }
+                                    .clickable { startTakePhoto(tempPhoto) }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -987,6 +1005,83 @@ fun AddProductScreen(
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+        }
+
+        // ── 保存成功庆祝浮层（扫码新增流程）：烟花 + 成功卡片，随后自动导航 ──
+        if (showSaveCelebration) {
+            val info = celebrationInfo
+            // 庆祝期间屏蔽返回键，避免中断导航闭环
+            BackHandler(enabled = true) { }
+            LaunchedEffect(Unit) {
+                delay(1500)
+                onSaved()
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.72f)),
+                contentAlignment = Alignment.Center
+            ) {
+                ConfettiFireworksEffect(
+                    modifier = Modifier.fillMaxSize(),
+                    isIncoming = true
+                )
+                Column(
+                    modifier = Modifier
+                        .padding(horizontal = 28.dp)
+                        .shadow(
+                            elevation = 32.dp,
+                            shape = RoundedCornerShape(24.dp),
+                            clip = false,
+                            ambientColor = Color.Transparent,
+                            spotColor = GreenPrimary.copy(alpha = 0.45f)
+                        )
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Brush.verticalGradient(GlassDefaults.hudFill))
+                        .glassBorder(24.dp)
+                        .border(1.5.dp, GreenPrimary.copy(alpha = 0.6f), RoundedCornerShape(24.dp))
+                        .padding(horizontal = 26.dp, vertical = 30.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(68.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(GreenPrimary.copy(alpha = 0.2f))
+                            .border(2.dp, GreenLight.copy(alpha = 0.6f), RoundedCornerShape(50)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = GreenLight,
+                            modifier = Modifier.size(36.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("商品档案已创建", color = Color.White, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        info?.first ?: "",
+                        color = Color.White.copy(alpha = 0.92f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "SKU: ${info?.second ?: ""}",
+                        color = TextMuted,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Spacer(Modifier.height(18.dp))
+                    Text("即将返回库存清单...", color = TextMuted.copy(alpha = 0.8f), fontSize = 11.sp)
+                }
+            }
         }
     }
 }

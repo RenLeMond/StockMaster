@@ -96,6 +96,12 @@ fun InventoryScreen(
     var selectedLocation by remember { mutableStateOf("全部") }
     var locationMenuOpen by remember { mutableStateOf(false) }
 
+    // 搜索防抖：输入时 250ms 内不立即全量过滤，避免千级 SKU 每键一抖
+    var debouncedQuery by remember { mutableStateOf("") }
+    androidx.compose.runtime.LaunchedEffect(searchQuery) {
+        kotlinx.coroutines.delay(250)
+        debouncedQuery = searchQuery
+    }
 
     val allCategories = remember(items, categories) {
         (listOf("全部") + categories).distinct().filter { it.isNotBlank() }
@@ -104,9 +110,9 @@ fun InventoryScreen(
         (listOf("全部") + locations).distinct().filter { it.isNotBlank() }
     }
 
-    val filtered = remember(items, searchQuery, selectedCategory, selectedLocation, onlyLowStock) {
+    val filtered = remember(items, debouncedQuery, selectedCategory, selectedLocation, onlyLowStock) {
         items.filter { item ->
-            val q = searchQuery.trim().lowercase()
+            val q = debouncedQuery.trim().lowercase()
             val matchSearch = q.isEmpty() ||
                 item.name.lowercase().contains(q) ||
                 item.sku.lowercase().contains(q) ||
@@ -147,34 +153,6 @@ fun InventoryScreen(
                             fontWeight = FontWeight.Bold,
                             maxLines = 1
                         )
-                        Box(
-                            modifier = Modifier
-                                .background(BlueLightBg, RoundedCornerShape(50))
-                                .padding(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                "${items.size} 种品类",
-                                color = BlueAccent,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1
-                            )
-                        }
-                        if (filtered.size != items.size) {
-                            Box(
-                                modifier = Modifier
-                                    .background(GreenTint, RoundedCornerShape(50))
-                                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                            ) {
-                                Text(
-                                    "匹配 ${filtered.size} 件",
-                                    color = GreenPrimary,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
-                        }
                     }
 
                     // 右侧动作：管理分类/库位 + 录入商品

@@ -5,6 +5,9 @@ import android.media.ToneGenerator
 
 /**
  * 扫码枪/摄像头扫描反馈音效（对应 Web 版 Web Audio API 提示音）。
+ *
+ * 生命周期：ToneGenerator 持有原生音频资源，需在 Activity onDestroy 释放；
+ * 若宿主因配置变更重建，re-init 会在下次 play 时懒加载重建。
  */
 object BeepPlayer {
 

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.util.Base64
 import androidx.core.graphics.scale
 import androidx.exifinterface.media.ExifInterface
+import com.stockmaster.app.data.BackupImageEntry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -15,6 +16,9 @@ import java.io.FileOutputStream
 import java.util.UUID
 
 object ImageUtils {
+
+    /** 应用私有图片目录的唯一来源：保存、备份导出与恢复物化必须共用同一目录。 */
+    fun imagesDir(context: Context): File = File(context.filesDir, "images")
 
     /** 读取压缩图片并按 EXIF 方向（旋转+镜像）纠正后保存至应用私有目录，返回 file:/// 格式路径。 */
     suspend fun saveCompressedImage(
@@ -48,16 +52,15 @@ object ImageUtils {
 
             var scaled = oriented
             if (maxOf(oriented.width, oriented.height) > maxSize) {
+                // 等比缩放：先用四舍五入避免向 0 截断，再钳制非零
                 val ratio = maxSize.toFloat() / maxOf(oriented.width, oriented.height)
-                scaled = oriented.scale(
-                    (oriented.width * ratio).toInt().coerceAtLeast(1),
-                    (oriented.height * ratio).toInt().coerceAtLeast(1),
-                    true
-                )
+                val targetW = (oriented.width * ratio + 0.5f).toInt().coerceAtLeast(1)
+                val targetH = (oriented.height * ratio + 0.5f).toInt().coerceAtLeast(1)
+                scaled = oriented.scale(targetW, targetH, true)
                 if (scaled !== oriented) oriented.recycle()
             }
 
-            val imageDir = File(context.filesDir, "images").apply { if (!exists()) mkdirs() }
+            val imageDir = imagesDir(context).apply { if (!exists()) mkdirs() }
             val fileName = "img_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(6)}.jpg"
             val imageFile = File(imageDir, fileName)
 
@@ -68,7 +71,7 @@ object ImageUtils {
             if (scaled !== oriented && !scaled.isRecycled) scaled.recycle()
             "file://${imageFile.absolutePath}"
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("ImageUtils", "saveCompressedImage failed", e)
             null
         }
     }
@@ -94,7 +97,7 @@ object ImageUtils {
                 BitmapFactory.decodeStream(it, null, opts)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("ImageUtils", "decodeSampledFromUri failed", e)
             null
         }
     }
@@ -151,6 +154,56 @@ object ImageUtils {
         } catch (e: Exception) {
             bitmap
         }
+    }
+
+    /**
+     * 图片载荷打包结果：[entries] 为实际嵌入备份的图片，[skippedCount] 为因超出总体积预算被跳过的数量。
+     */
+    data class ImagePayloadResult(
+        val entries: List<BackupImageEntry>,
+        val skippedCount: Int
+    )
+
+    /**
+     * 打包备份用图片载荷：收集 [referencedUrls] 中指向 [imagesDir] 的文件并 Base64 编码。
+     * 仅嵌入存在且不超过单图上限的文件；同时受 [maxTotalBytes] 总预算约束（按 Base64 编码后体积计），
+     * 超出的图片跳过并计入 skippedCount，避免大量商品图一次性全量进内存导致 OOM。
+     * 涉及磁盘 IO，须在 IO 线程调用。
+     */
+    fun collectImagePayloads(
+        imagesDir: File?,
+        referencedUrls: Collection<String>,
+        maxBytesPerImage: Long = 4L * 1024 * 1024,
+        maxTotalBytes: Long = 64L * 1024 * 1024
+    ): ImagePayloadResult {
+        val dir = imagesDir?.takeIf { it.exists() } ?: return ImagePayloadResult(emptyList(), 0)
+        val names = referencedUrls
+            .filter { it.startsWith("file://") }
+            .mapNotNull { url -> File(url.removePrefix("file://")).name }
+            .toSet()
+        if (names.isEmpty()) return ImagePayloadResult(emptyList(), 0)
+        var usedBytes = 0L
+        var skipped = 0
+        val entries = ArrayList<BackupImageEntry>()
+        for (name in names) {
+            val entry = runCatching {
+                val f = File(dir, name)
+                if (f.exists() && f.length() in 1..maxBytesPerImage) {
+                    BackupImageEntry(
+                        name = name,
+                        b64 = Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)
+                    )
+                } else null
+            }.getOrNull() ?: continue
+            // 预算按编码后体积计（b64.length 即编码后字节数，NO_WRAP 纯 ASCII），这才是真正写入备份文件的量
+            if (usedBytes + entry.b64.length > maxTotalBytes) {
+                skipped++
+                continue
+            }
+            usedBytes += entry.b64.length
+            entries.add(entry)
+        }
+        return ImagePayloadResult(entries, skipped)
     }
 
     /**

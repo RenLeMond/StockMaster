@@ -114,6 +114,7 @@ import com.stockmaster.app.data.InventoryItem
 import com.stockmaster.app.data.SizeBreakdown
 import com.stockmaster.app.data.TxType
 import com.stockmaster.app.ui.MainViewModel
+import com.stockmaster.app.ui.components.ConfettiFireworksEffect
 import com.stockmaster.app.ui.components.GlassDefaults
 import com.stockmaster.app.ui.components.ItemImage
 import com.stockmaster.app.ui.components.SMNumberField
@@ -270,12 +271,20 @@ fun ScanScreen(
     // 手电筒状态由本页面独占控制，本地维护即可；
     // 避免对 cameraInfo?.torchState 做条件 observeAsState（违反 Compose 调用稳定性规则）
 
+    // O(1) 索引：千级 SKU 时扫码匹配从 O(n) 降至 O(1)，避免每帧扫码主线程抖动
+    val barcodeLookup = remember(items) {
+        val map = HashMap<String, InventoryItem>(items.size * 2)
+        for (it in items) {
+            if (it.barcode.isNotBlank()) map[it.barcode.lowercase()] = it
+            if (it.sku.isNotBlank()) map[it.sku.lowercase()] = it
+        }
+        map
+    }
+
     fun handleBarcodeDetected(scannedText: String) {
         if (scannedText.isBlank() || successCelebration != null) return
         val clean = scannedText.trim()
-        val matched = items.firstOrNull {
-            it.barcode.lowercase() == clean.lowercase() || it.sku.lowercase() == clean.lowercase()
-        }
+        val matched = barcodeLookup[clean.lowercase()]
         scanLockTrigger = true
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         if (matched != null) {
@@ -656,17 +665,29 @@ fun ScanScreen(
                     tint = if (torchOn) Color(0xFFFFC107) else Color.White,
                     onClick = {
                         val control = cameraControl
-                        if (control != null && hasFlash) {
-                            control.enableTorch(!torchOn)
-                            torchOn = !torchOn
-                        } else {
-                            Toast.makeText(context, "当前摄像头未开放物理闪光灯控制", Toast.LENGTH_SHORT).show()
+                        when {
+                            control != null && hasFlash -> {
+                                control.enableTorch(!torchOn)
+                                torchOn = !torchOn
+                            }
+                            control == null ->
+                                Toast.makeText(context, "相机正在启动或切换，请稍候", Toast.LENGTH_SHORT).show()
+                            else ->
+                                Toast.makeText(context, "当前摄像头未配备闪光灯", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
                 RoundIconButton(
                     icon = Icons.Filled.Cameraswitch,
-                    onClick = { useFront = !useFront }
+                    onClick = {
+                        // 切换镜头会重建相机绑定：旧控制句柄作废、新手电筒状态从关闭开始，
+                        // 不清理会出现「图标显示开但灯不亮」（torchOn 残留）或对死对象 enableTorch
+                        torchOn = false
+                        cameraControl = null
+                        cameraInfo = null
+                        hasFlash = false
+                        useFront = !useFront
+                    }
                 )
                 RoundIconButton(
                     icon = Icons.Filled.Image,
@@ -832,95 +853,6 @@ fun ScanScreen(
         }
     }
 }
-
-@Composable
-private fun ConfettiFireworksEffect(
-    modifier: Modifier = Modifier,
-    isIncoming: Boolean = true
-) {
-    val progress = remember { androidx.compose.animation.core.Animatable(0f) }
-    val particles = remember {
-        val colors = if (isIncoming) {
-            listOf(
-                Color(0xFF10B981), Color(0xFF34D399), Color(0xFFF59E0B),
-                Color(0xFFFFD700), Color(0xFF3B82F6), Color(0xFFEC4899), Color.White
-            )
-        } else {
-            listOf(
-                Color(0xFFEF4444), Color(0xFFF87171), Color(0xFFF59E0B),
-                Color(0xFFFFD700), Color(0xFF8B5CF6), Color(0xFF06B6D4), Color.White
-            )
-        }
-        val random = java.util.Random()
-        (0 until 80).map {
-            val angle = random.nextDouble() * 2 * Math.PI
-            val speed = 900f + random.nextFloat() * 1600f
-            val vx = (Math.cos(angle) * speed).toFloat()
-            val vy = (Math.sin(angle) * speed).toFloat() - 450f
-            ConfettiParticle(
-                vx = vx,
-                vy = vy,
-                color = colors[random.nextInt(colors.size)],
-                size = 10f + random.nextFloat() * 18f,
-                rotation = random.nextFloat() * 360f,
-                rotSpeed = (random.nextFloat() - 0.5f) * 720f,
-                isSquare = random.nextBoolean()
-            )
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        progress.animateTo(
-            targetValue = 1f,
-            animationSpec = tween(durationMillis = 1500, easing = LinearEasing)
-        )
-    }
-
-    Canvas(modifier = modifier) {
-        val t = progress.value
-        val centerX = size.width / 2f
-        val centerY = size.height * 0.42f
-        val gravity = 1400f
-
-        particles.forEach { p ->
-            val curX = centerX + p.vx * t
-            val curY = centerY + p.vy * t + 0.5f * gravity * t * t
-            val alpha = (1f - t * 0.95f).coerceIn(0f, 1f)
-            val curRotation = p.rotation + p.rotSpeed * t
-            val curSize = p.size * (1f - 0.2f * t)
-
-            if (alpha > 0.01f) {
-                drawContext.canvas.save()
-                drawContext.canvas.translate(curX, curY)
-                drawContext.canvas.rotate(curRotation)
-
-                if (p.isSquare) {
-                    drawRect(
-                        color = p.color.copy(alpha = alpha),
-                        topLeft = androidx.compose.ui.geometry.Offset(-curSize / 2, -curSize / 2),
-                        size = androidx.compose.ui.geometry.Size(curSize, curSize)
-                    )
-                } else {
-                    drawCircle(
-                        color = p.color.copy(alpha = alpha),
-                        radius = curSize / 2f
-                    )
-                }
-                drawContext.canvas.restore()
-            }
-        }
-    }
-}
-
-private data class ConfettiParticle(
-    val vx: Float,
-    val vy: Float,
-    val color: Color,
-    val size: Float,
-    val rotation: Float,
-    val rotSpeed: Float,
-    val isSquare: Boolean
-)
 
 @Composable
 private fun ScanCelebrationCard(
@@ -1219,7 +1151,9 @@ fun CameraScannerView(
         }
     }
 
-    var disposed by remember { mutableStateOf(false) }
+    // 必须随 useFront 重置：该标志在 onDispose 置 true 后用于拦截旧 provider 回调，
+    // 若跨 effect 重启保留，切换镜头后的新绑定会被误判为「已销毁」而直接跳过（表现为切换无效、手电筒失控）
+    var disposed by remember(useFront) { mutableStateOf(false) }
 
     DisposableEffect(useFront, lifecycleOwner) {
         val executor = Executors.newSingleThreadExecutor()
@@ -1288,6 +1222,13 @@ fun CameraScannerView(
             } catch (e: Exception) {
             }
             executor.shutdown()
+            try {
+                if (!executor.awaitTermination(800, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                    executor.shutdownNow()
+                }
+            } catch (_: InterruptedException) {
+                executor.shutdownNow()
+            }
             scanner.close()
         }
     }

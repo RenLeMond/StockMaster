@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -54,7 +53,6 @@ import com.stockmaster.app.ui.theme.BlueAccent
 import com.stockmaster.app.ui.theme.BlueLightBg
 import com.stockmaster.app.ui.theme.BorderBlue
 import com.stockmaster.app.ui.theme.DividerColor
-import com.stockmaster.app.ui.theme.GlowEmerald
 import com.stockmaster.app.ui.theme.GreenBorder
 import com.stockmaster.app.ui.theme.GreenLight
 import com.stockmaster.app.ui.theme.GreenPrimary
@@ -138,18 +136,6 @@ fun DashboardScreen(
                     .glassBorder(24.dp)
                     .padding(20.dp)
             ) {
-                // 顶部翡翠环境光晕
-                Box(
-                    Modifier
-                        .matchParentSize()
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(GlowEmerald.copy(alpha = 0.22f), Color.Transparent),
-                                center = Offset(0f, 0f),
-                                radius = 640f
-                            )
-                        )
-                )
                 Column {
                         // 顶部 Eyebrow Tag 行
                         Row(

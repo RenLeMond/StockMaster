@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.SettingsBackupRestore
 
 import com.stockmaster.app.data.BackupManager
 import com.stockmaster.app.data.BackupBundle
+import com.stockmaster.app.util.ImageUtils
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,8 +82,8 @@ import kotlinx.coroutines.withContext
 
 /** 设置页（对应 Web SettingsDrawer）。 */
 
-/** 恢复备份的文件大小上限（50MB），防止误选超大文件一次性读入内存导致 OOM。 */
-private const val MAX_BACKUP_BYTES: Long = 50L * 1024 * 1024
+/** 恢复备份的文件大小上限（200MB，含内嵌图片），防止误选超大文件一次性读入内存导致 OOM。 */
+private const val MAX_BACKUP_BYTES: Long = 200L * 1024 * 1024
 
 private fun backupFileSize(context: Context, uri: Uri): Long? = try {
     context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
@@ -118,18 +119,33 @@ fun SettingsScreen(
             // NonCancellable：SAF 写盘不随页面退出取消，避免导出文件被截断成损坏文件
             scope.launch(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                 try {
+                    val payloads = ImageUtils.collectImagePayloads(
+                        imagesDir = ImageUtils.imagesDir(context),
+                        referencedUrls = items.map { it.imageUrl } +
+                            transactions.map { it.imageUrl }
+                    )
                     val bundle = BackupManager.createBackupBundle(
                         items = items,
                         transactions = transactions,
                         categories = categories,
-                        locations = locations
+                        locations = locations,
+                        // 内嵌商品图片本体：跨设备/重装后恢复备份时图片不丢
+                        imagePayloads = payloads.entries
                     )
                     val jsonText = BackupManager.encodeBackupBundle(bundle)
                     context.contentResolver.openOutputStream(it)?.use { stream ->
                         stream.write(jsonText.toByteArray(Charsets.UTF_8))
                     }
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "全量数据备份已成功导出！", Toast.LENGTH_SHORT).show()
+                        if (payloads.skippedCount > 0) {
+                            Toast.makeText(
+                                context,
+                                "备份已导出；因体积限制 ${payloads.skippedCount} 张图片未打包，其余数据完整",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(context, "全量数据备份已成功导出！", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 } catch (e: Exception) {
                     withContext(Dispatchers.Main) {

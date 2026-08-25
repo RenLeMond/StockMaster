@@ -45,9 +45,12 @@ object CsvManager {
     /**
      * 双引号包裹并转义内部引号，保证含逗号/引号字段不破坏 CSV 结构。
      * 同时中和 Excel/WPS 公式注入：以 = + - @ Tab CR 开头的单元格前置单引号（OWASP 建议）。
+     * 注意：纯数字条码如 "+123" 也会触发 Excel 公式解析，保守前置防注入；
+     * 已带前导 "'" 的不再重复转义，避免导入后残留。
      */
     private fun csv(v: String): String {
-        val safe = if (v.isNotEmpty() && v[0] in "=+-@\t\r") "'$v" else v
+        val needsEscape = v.isNotEmpty() && v[0] in "=+-@\t\r" && (v.length == 1 || v[0] != '\'' )
+        val safe = if (needsEscape) "'$v" else v
         return "\"${safe.replace("\"", "\"\"")}\""
     }
 
@@ -112,7 +115,6 @@ object CsvManager {
         if (rows.size <= 1) return emptyList()
 
         val items = mutableListOf<InventoryItem>()
-        val now = System.currentTimeMillis()
         val nowIso = LocalDateTime.now().toString()
 
         for (i in 1 until rows.size) {
@@ -133,7 +135,7 @@ object CsvManager {
 
                 items.add(
                     InventoryItem(
-                        id = "item-$now-$i",
+                        id = "item-${java.util.UUID.randomUUID()}",
                         sku = sku,
                         name = name,
                         barcode = barcode,

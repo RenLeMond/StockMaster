@@ -43,8 +43,11 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // 仅在非配置变更的真正销毁时释放音频资源；配置变更（旋转）后重建会复用单例，懒加载重建即可
+        if (!isChangingConfigurations) {
+            com.stockmaster.app.util.BeepPlayer.release()
+        }
         ScannerGun.onScanned = null
-        com.stockmaster.app.util.BeepPlayer.release()
     }
 
     /** 外接扫码枪按键分发。 */

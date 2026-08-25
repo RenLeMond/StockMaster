@@ -7,6 +7,13 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** 内嵌图片载荷：文件名 + Base64 内容，用于跨设备恢复私有目录图片。 */
+@Serializable
+data class BackupImageEntry(
+    val name: String,
+    val b64: String
+)
+
 @Serializable
 data class BackupBundle(
     val version: Int = 1,
@@ -20,7 +27,9 @@ data class BackupBundle(
     val transactions: List<TransactionRecord> = emptyList(),
     // 给默认值：旧版本/Web 版备份可能不含这两个键，缺失时按空集处理而非解析失败
     val categories: List<String> = emptyList(),
-    val locations: List<String> = emptyList()
+    val locations: List<String> = emptyList(),
+    // 图片为可选字段：旧备份缺失时按无内嵌图片处理，恢复逻辑自动降级
+    val images: List<BackupImageEntry> = emptyList()
 )
 
 object BackupManager {
@@ -39,7 +48,8 @@ object BackupManager {
         items: List<InventoryItem>,
         transactions: List<TransactionRecord>,
         categories: List<String>,
-        locations: List<String>
+        locations: List<String>,
+        imagePayloads: List<BackupImageEntry> = emptyList()
     ): BackupBundle {
         return BackupBundle(
             backupTime = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()),
@@ -48,7 +58,8 @@ object BackupManager {
             items = items,
             transactions = transactions,
             categories = categories,
-            locations = locations
+            locations = locations,
+            images = imagePayloads
         )
     }
 
