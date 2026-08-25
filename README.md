@@ -45,11 +45,9 @@
 
 ## 📸 Screenshots / Demo
 
-> `docs/screenshots/` 占位，替换为真机截图后即刻生效（建议 270×600，PNG）
-
 | 仪表盘 | 扫码工作台 | 库存 | 商品详情 | 流水 |
 |---|---|---|---|---|
-| ![Dashboard](https://via.placeholder.com/270x600/0D1626/34D399?text=Dashboard) | ![Scan](https://via.placeholder.com/270x600/0D1626/34D399?text=Scan) | ![Inventory](https://via.placeholder.com/270x600/0D1626/34D399?text=Inventory) | ![Detail](https://via.placeholder.com/270x600/0D1626/34D399?text=Detail) | ![History](https://via.placeholder.com/270x600/0D1626/34D399?text=History) |
+| ![Dashboard](docs/screenshots/dashboard.jpg) | ![Scan](docs/screenshots/scan.jpg) | ![Inventory](docs/screenshots/inventory.jpg) | ![Detail](docs/screenshots/detail.jpg) | ![History](docs/screenshots/history.jpg) |
 
 <details>
 <summary>GIF 演示（可选）</summary>
