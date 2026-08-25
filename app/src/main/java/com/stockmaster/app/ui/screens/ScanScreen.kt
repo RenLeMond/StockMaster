@@ -15,6 +15,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.TorchState
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -483,6 +484,7 @@ fun ScanScreen(
                     cameraControl = control
                     cameraInfo = info
                     hasFlash = info.hasFlashUnit()
+                    torchOn = info.torchState.value == TorchState.ON
                 },
                 onCameraError = {
                     cameraError = it
@@ -666,14 +668,22 @@ fun ScanScreen(
                     onClick = {
                         val control = cameraControl
                         when {
-                            control != null && hasFlash -> {
-                                control.enableTorch(!torchOn)
-                                torchOn = !torchOn
+                            control != null -> {
+                                val targetTorch = !torchOn
+                                val future = control.enableTorch(targetTorch)
+                                future.addListener({
+                                    try {
+                                        future.get()
+                                        torchOn = targetTorch
+                                    } catch (e: Exception) {
+                                        torchOn = false
+                                        val msg = e.cause?.localizedMessage ?: e.localizedMessage ?: "硬件不支持或被系统占用"
+                                        Toast.makeText(context, "闪光灯切换失败: $msg", Toast.LENGTH_SHORT).show()
+                                    }
+                                }, ContextCompat.getMainExecutor(context))
                             }
-                            control == null ->
-                                Toast.makeText(context, "相机正在启动或切换，请稍候", Toast.LENGTH_SHORT).show()
                             else ->
-                                Toast.makeText(context, "当前摄像头未配备闪光灯", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "相机正在启动或切换，请稍候", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
@@ -1151,11 +1161,8 @@ fun CameraScannerView(
         }
     }
 
-    // 必须随 useFront 重置：该标志在 onDispose 置 true 后用于拦截旧 provider 回调，
-    // 若跨 effect 重启保留，切换镜头后的新绑定会被误判为「已销毁」而直接跳过（表现为切换无效、手电筒失控）
-    var disposed by remember(useFront) { mutableStateOf(false) }
-
     DisposableEffect(useFront, lifecycleOwner) {
+        var isDisposed = false
         val executor = Executors.newSingleThreadExecutor()
         val scanner = BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -1191,7 +1198,7 @@ fun CameraScannerView(
 
         val providerFuture = ProcessCameraProvider.getInstance(context)
         val listener = Runnable {
-            if (disposed) return@Runnable
+            if (isDisposed) return@Runnable
             val provider = try {
                 providerFuture.get()
             } catch (e: Exception) {
@@ -1214,7 +1221,7 @@ fun CameraScannerView(
         providerFuture.addListener(listener, ContextCompat.getMainExecutor(context))
 
         onDispose {
-            disposed = true
+            isDisposed = true
             try {
                 if (providerFuture.isDone) {
                     providerFuture.get()?.unbindAll()
