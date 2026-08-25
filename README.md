@@ -271,8 +271,8 @@ data class TransactionRecord(
 
 | 版本 | 状态 | 内容 |
 |---|---|---|
-| v1.3 | ✅ 已发布 | 图片存储解耦 / `Mutex` 并发加锁 / 导航栈 / 3 行 Header / 烟花特效 / SAF 备份 |
-| v1.4 | 🚧 规划中 | ESC/POS 蓝牙热敏标签打印 · 多仓库独立核算 · 本地加密数据包一键快传与跨设备备份 |
+| v1.0.0 | ✅ 已发布 | 首次正式发布：多模态扫码 / 多尺码矩阵 / 仪表盘 / 流水追溯 / SAF 本地备份 / 烟花声触反馈 |
+| v1.1.0 | 🚧 规划中 | ESC/POS 蓝牙热敏标签打印 · 多仓库独立核算 · 本地加密数据包一键快传与跨设备备份 |
 | Backlog | 💡 候选 | 桌面端 CSV 模板校验工具 · 条码批量生成与打印排版 |
 
 > 变更记录见 [Releases](https://github.com/RenLeMond/StockMaster/releases)。
